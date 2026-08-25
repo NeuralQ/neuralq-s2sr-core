@@ -30,6 +30,7 @@ _ops.unary_union = lambda *a, **k: None
 sys.modules["shapely.ops"] = _ops
 
 sys.path.insert(0, str(SCRIPTS))
+sys.path.insert(0, str(REPO / "examples"))
 
 import output_layout  # noqa: E402
 import run_location  # noqa: E402

@@ -7,14 +7,15 @@ organized layout outputs/QA/<date>/<inference_id>/ with all scratch state
 in a transient .work/ directory removed when the run ends. Every
 run_location.py option remains available, e.g.:
 
-  python scripts/run_location_doha.py --search-only
-  python scripts/run_location_doha.py
-  python scripts/run_location_doha.py --date 2026-08-09 --tile-size 96
+  python examples/run_location_doha.py --search-only
+  python examples/run_location_doha.py
+  python examples/run_location_doha.py --date 2026-08-09 --tile-size 96
 """
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
 
 import run_location
 

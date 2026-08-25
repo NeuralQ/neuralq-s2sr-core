@@ -3,7 +3,7 @@
 
 Step 1 - plan the best acquisition dates:
 
-  python scripts/run_mosaique_doha.py --plan-dates \
+  python examples/run_mosaique_doha.py --plan-dates \
     --start-date 2020-01-01 --end-date 2026-08-21 --frequency weekly
 
 Queries the Earth Search STAC catalog over the Doha municipality boundary,
@@ -12,9 +12,9 @@ per period, and writes outputs/doha_timeseries/dates.json.
 
 Step 2 - run the mosaic time series over those dates:
 
-  python scripts/run_mosaique_doha.py
-  python scripts/run_mosaique_doha.py --max-dates 4
-  python scripts/run_mosaique_doha.py --workers 6
+  python examples/run_mosaique_doha.py
+  python examples/run_mosaique_doha.py --max-dates 4
+  python examples/run_mosaique_doha.py --workers 6
 
 Each date runs scripts/run_mosaic.py into its own output folder
 outputs/QA/<date>/<inference_id> (transient state in .work/, removed on
@@ -49,6 +49,7 @@ from shapely.geometry import mapping
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from output_layout import country_code, inference_directory
 import run_mosaic as run_mosaic_module
@@ -273,7 +274,7 @@ def load_dates(path: Path) -> list[dict]:
     if not path.is_file():
         raise SystemExit(
             f"Dates file not found: {path}\n"
-            "Generate it first: python scripts/run_mosaique_doha.py --plan-dates"
+            "Generate it first: python examples/run_mosaique_doha.py --plan-dates"
         )
     plan = json.loads(path.read_text(encoding="utf-8"))
     return plan["entries"]

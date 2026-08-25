@@ -59,14 +59,15 @@ sr = super_resolve_dn(model, stack_dn)   # (50, H, W) uint16 -> (10, 10H, 10W) u
 neuralq-s2sr-core/
 ├── models/                  checkpoint (SHA-256-pinned)
 ├── s2sr/                    model package: architecture, loader, inference helpers
-├── scripts/
+├── scripts/                 generic, location-agnostic pipeline
 │   ├── upstream.py          integration boundary to the compiled preprocessing engine
 │   ├── output_layout.py     shared helpers: IDs, geocoding, inventories, README writer
-│   ├── run_location.py      single-location inference pipeline
-│   ├── run_location_doha.py Doha defaults wrapper
-│   ├── run_mosaic.py        resumable boundary tiling -> clipped BigTIFFs
-│   ├── run_mosaique_doha.py time-series orchestrator (planning + workers)
+│   ├── run_location.py      single-location inference (any coordinates)
+│   ├── run_mosaic.py        resumable boundary tiling -> clipped BigTIFFs (any city)
 │   └── spectral_indices.py  15 indices in 4 categories from MS.tif
+├── examples/                location presets; see examples/README.md
+│   ├── run_location_doha.py Doha defaults wrapper
+│   └── run_mosaique_doha.py Doha weekly time-series orchestrator
 ├── tests/                   stdlib-only unit tests
 └── outputs/                 products; transient .work/ scratch auto-removed
 ```
@@ -112,9 +113,9 @@ Budget ~37 GB peak working state per date.
 Time series:
 
 ```bash
-python scripts/run_mosaique_doha.py --plan-dates \
+python examples/run_mosaique_doha.py --plan-dates \
   --start-date 2020-01-01 --end-date 2026-08-21 --frequency weekly
-python scripts/run_mosaique_doha.py          # resumable; --max-dates N; keep --workers 1
+python examples/run_mosaique_doha.py         # resumable; --max-dates N; keep --workers 1
 ```
 
 Verification and tests:

@@ -56,7 +56,7 @@ sr = super_resolve_dn(model, stack_dn)   # (50, H, W) uint16 -> (10, 10H, 10W) u
 ## Repository Layout
 
 ```
-neuralq-s2sr-api/
+neuralq-s2sr-core/
 ├── models/                  checkpoint (SHA-256-pinned)
 ├── s2sr/                    model package: architecture, loader, inference helpers
 ├── scripts/
@@ -77,8 +77,8 @@ neuralq-s2sr-api/
 - Conda environment:
 
 ```bash
-conda env create -f environment.yml    # neuralq-s2sr-api, Python 3.12
-conda activate neuralq-s2sr-api
+conda env create -f environment.yml    # neuralq-s2sr-core, Python 3.12
+conda activate neuralq-s2sr-core
 ```
 
 - The compiled preprocessing engine (STAC access, co-registration, tiled I/O)

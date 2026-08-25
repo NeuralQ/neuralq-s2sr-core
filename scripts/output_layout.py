@@ -11,7 +11,7 @@ from pathlib import Path
 GEO_CACHE = Path(
     os.environ.get(
         "S2SR_GEO_CACHE",
-        str(Path.home() / ".cache" / "neuralq-s2sr-api" / "geo_cache.json"),
+        str(Path.home() / ".cache" / "neuralq-s2sr-core" / "geo_cache.json"),
     )
 )
 NOMINATIM_REVERSE_URL = "https://nominatim.openstreetmap.org/reverse"

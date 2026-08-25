@@ -1,4 +1,4 @@
-name: neuralq-s2sr-api
+name: neuralq-s2sr-core
 channels:
   - defaults
   - conda-forge

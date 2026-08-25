@@ -414,6 +414,8 @@ def main() -> None:
             args.tile_footprint or run_mosaic_module.TILE_FOOTPRINT_DEFAULT,
             selected_products,
             args.max_component_distance_km,
+            args.boundary_query,
+            args.osm_id,
         )
         output_dir = inference_directory(
             args.output_root.resolve(), code, entry_date, inference_id

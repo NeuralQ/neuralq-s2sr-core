@@ -190,6 +190,27 @@ def test_new_inference_id_shape():
     )
 
 
+def test_place_slug():
+    eq(run_mosaic.place_slug("Lyon, France"), "Lyon", "first comma-part")
+    eq(run_mosaic.place_slug("Doha, Qatar"), "Doha", "default city")
+    ok(
+        run_mosaic.place_slug("Frankfurt am Main, Germany").startswith("Frankfurt"),
+        "multi-word kept",
+    )
+
+
+def test_mosaic_id_distinguishes_boundaries():
+    common = ("2026-08-14", 4000.0, 4120.0, ["MS"], 20)
+    doha = run_mosaic.mosaic_inference_id(*common, query="Doha, Qatar", osm_id=27332)
+    lyon = run_mosaic.mosaic_inference_id(*common, query="Lyon, France", osm_id=35238)
+    ok(doha != lyon, "different cities never share a deterministic folder id")
+    eq(
+        run_mosaic.mosaic_inference_id(*common, query="Doha, Qatar", osm_id=27332),
+        doha,
+        "same plan stays stable",
+    )
+
+
 def main() -> int:
     failures = 0
     for name, function in sorted(globals().items()):

@@ -37,6 +37,7 @@ import json
 import math
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -77,6 +78,8 @@ def mosaic_inference_id(
     tile_footprint: float,
     products: list[str],
     max_component_distance_km: float,
+    query: str,
+    osm_id: int,
 ) -> str:
     signature = plan_signature(
         date=date_iso,
@@ -84,6 +87,8 @@ def mosaic_inference_id(
         tile_footprint=tile_footprint,
         products=list(products),
         max_component_distance_km=max_component_distance_km,
+        query=query,
+        osm_id=osm_id,
     )
     return f"mosaic-{date_iso.replace('-', '')}-{signature}"
 
@@ -97,6 +102,12 @@ def utm_crs_for(longitude: float, latitude: float) -> str:
     zone = int((longitude + 180) // 6) + 1
     band = 326 if latitude >= 0 else 327
     return f"EPSG:{band * 100 + zone}"
+
+
+def place_slug(query: str) -> str:
+    """Short place label for product filenames ('Lyon, France' -> 'Lyon')."""
+    cleaned = re.sub(r"[^A-Za-z0-9]+", "", query.split(",")[0])
+    return cleaned[:32].title() or "Mosaic"
 
 
 def parse_args() -> argparse.Namespace:
@@ -220,6 +231,7 @@ def fetch_boundary(
         "source": "OpenStreetMap/Nominatim",
         "osm_relation": osm_id,
         "boundary_query": query,
+        "place": place_slug(query),
         "crs": crs,
         "area_km2": round(filtered_utm.area / 1_000_000, 3),
         "component_count": len(retained),
@@ -410,7 +422,7 @@ def load_or_create_manifest(
 
     manifest = {
         "schema_version": 1,
-        "name": "Doha municipality S2SR mosaic",
+        "name": f"{boundary_metadata.get('place', 'Mosaic')} municipality S2SR mosaic",
         "date": options.date,
         "state": "planned",
         "created_at": utc_now(),
@@ -634,12 +646,13 @@ def build_mosaic(
 ) -> None:
     final_dir.mkdir(exist_ok=True)
     compact_date = manifest["date"].replace("-", "")
+    place = manifest.get("boundary", {}).get("place", "Mosaic")
     generated = {}
 
     for product in manifest["selected_products"]:
         sources = [tile["products"][product] for tile in manifest["tiles"]]
-        vrt = final_dir / f"Doha_{compact_date}_{product}.vrt"
-        destination = final_dir / f"Doha_{compact_date}_S2SR_{product}_1m.tif"
+        vrt = final_dir / f"{place}_{compact_date}_{product}.vrt"
+        destination = final_dir / f"{place}_{compact_date}_S2SR_{product}_1m.tif"
         vrt_options = ["-overwrite", "-resolution", "highest"]
         if product != "MS":
             # Zero is a legitimate reflectance DN; treat it as nodata only in
@@ -703,7 +716,7 @@ def build_mosaic(
 
     if "TCI" in generated:
         preview_source = Path(generated["TCI"]["path"])
-        preview = final_dir / f"Doha_{compact_date}_preview.tif"
+        preview = final_dir / f"{place}_{compact_date}_preview.tif"
         subprocess.run(
             [
                 executable("gdal_translate"),
@@ -834,6 +847,8 @@ def main() -> None:
             options.tile_footprint,
             options.products,
             options.max_component_distance_km,
+            options.boundary_query,
+            options.osm_id,
         )
         output_root = (options.output_root or ROOT / "outputs").resolve()
         output_dir = inference_directory(output_root, code, options.date, inference_id)
@@ -955,7 +970,10 @@ def main() -> None:
     if not options.skip_mosaic:
         lock_file.close()
         shutil.rmtree(workspace, ignore_errors=True)
-    print("Doha mosaic completed successfully", flush=True)
+    print(
+        f"{boundary_metadata.get('place', 'Mosaic')} mosaic completed successfully",
+        flush=True,
+    )
 
 
 if __name__ == "__main__":

@@ -16,7 +16,6 @@ neuralq-s2sr-api/
 ├── README.md                        this document
 ├── environment.yml                  conda spec for the s2sr-inference environment
 ├── models/
-│   ├── S2SR-GL-20241022.1.cms       encrypted upstream object   (840,950,890 B)
 │   └── S2SR-GL-20241022.1.pt        decrypted checkpoint        (840,950,460 B)
 ├── s2sr/                            clean-room model package
 │   ├── __init__.py                  public exports

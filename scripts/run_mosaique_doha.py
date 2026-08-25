@@ -268,7 +268,6 @@ def executable(name: str) -> str:
 def build_command(
     args: argparse.Namespace,
     entry_date: str,
-    workspace: Path,
     output_dir: Path,
     inference_id: str,
 ) -> list[str]:
@@ -277,8 +276,6 @@ def build_command(
         str(ROOT / "scripts" / "run_mosaic.py"),
         "--date",
         entry_date,
-        "--workspace",
-        str(workspace),
         "--output-dir",
         str(output_dir),
         "--inference-id",
@@ -361,6 +358,17 @@ def uncompressed_complete(output_dir: Path, products: list[str]) -> bool:
     return len(found) == len(products)
 
 
+def _pid_command(pid: int) -> str | None:
+    """Return the command line of a live process, or None when it does not exist."""
+    result = subprocess.run(
+        ["ps", "-ww", "-p", str(pid), "-o", "command="],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    return result.stdout.strip() or None
+
+
 def workspace_busy(workspace: Path) -> bool:
     pid_path = workspace / "runner.pid"
     if not pid_path.is_file():
@@ -370,14 +378,12 @@ def workspace_busy(workspace: Path) -> bool:
     except ValueError:
         return False
     try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    try:
-        cmdline = Path(f"/proc/{pid}/cmdline").read_bytes()
-    except OSError:
+        command = _pid_command(pid)
+    except (OSError, subprocess.TimeoutExpired):
         return True
-    return b"run_mosaic" in cmdline
+    if command is None:
+        return False
+    return "run_mosaic" in command
 
 
 def disk_has_room(min_free_gb: float) -> bool:
@@ -441,7 +447,7 @@ def main() -> None:
             )
             return
 
-        command = build_command(args, entry_date, workspace, output_dir, inference_id)
+        command = build_command(args, entry_date, output_dir, inference_id)
         if args.dry_run:
             print(f"[{entry_date}] dry-run: {' '.join(command)}", flush=True)
             return

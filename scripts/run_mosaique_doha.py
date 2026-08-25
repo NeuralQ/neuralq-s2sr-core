@@ -15,20 +15,17 @@ Step 2 - run the mosaic time series over those dates:
   python scripts/run_mosaique_doha.py
   python scripts/run_mosaique_doha.py --max-dates 4
   python scripts/run_mosaique_doha.py --workers 6
-  python scripts/run_mosaique_doha.py --uncompressed --products MS
 
 Each date runs scripts/run_mosaic.py into its own output folder
 outputs/QA/<date>/<inference_id> (transient state in .work/, removed on
-success) plus a README.md with the run metadata.
-Completed dates are skipped on rerun,
+success) plus a README.md with the run metadata. Final mosaics are written
+uncompressed (COMPRESS=NONE). Completed dates are skipped on rerun,
 so the series is fully resumable. --workers N runs up to N dates
 concurrently; each worker needs roughly 2 GB RAM and 1 GB VRAM, and a
 date is never started when another live runner already owns its
-workspace or free disk falls below --min-free-gb. --uncompressed
-additionally exports COMPRESS=NONE copies (~19.7 GB per date) under each
-date's uncompressed/ folder; keep it off unless you have terabytes free.
-Final mosaics are written uncompressed (COMPRESS=NONE) since the run_mosaic
-update, so --uncompressed only backfills dates whose finals predate it.
+workspace or free disk falls below --min-free-gb. Boundary selection
+(--boundary-query/--osm-id) and the per-tile timeout are forwarded to
+run_mosaic.py.
 """
 import sys
 
@@ -109,11 +106,6 @@ def parse_args() -> argparse.Namespace:
         "--country-code",
         help="ISO 3166-1 alpha-2 code; reverse-geocoded from central Doha when omitted",
     )
-    parser.add_argument(
-        "--uncompressed",
-        action="store_true",
-        help="Export COMPRESS=NONE copies of final products after each date",
-    )
     parser.add_argument("--dry-run", action="store_true")
 
     parser.add_argument("--products", nargs="+", choices=("MS", "TCI", "NDVI", "IRP"))
@@ -122,6 +114,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tile-footprint", type=float)
     parser.add_argument("--retries", type=int)
     parser.add_argument("--max-component-distance-km", type=float, default=20)
+    parser.add_argument(
+        "--boundary-query",
+        default=run_mosaic_module.DEFAULT_BOUNDARY_QUERY,
+        help="Nominatim query for the mosaic boundary (forwarded to run_mosaic)",
+    )
+    parser.add_argument(
+        "--osm-id",
+        type=int,
+        default=run_mosaic_module.DEFAULT_OSM_ID,
+        help="Keep only the Nominatim feature with this OSM id (forwarded)",
+    )
+    parser.add_argument(
+        "--tile-timeout",
+        type=int,
+        default=run_mosaic_module.TILE_TIMEOUT_DEFAULT,
+        help="Per-tile subprocess timeout in seconds (forwarded)",
+    )
     parser.add_argument("--prune-unselected", action="store_true")
     parser.add_argument("--skip-mosaic", action="store_true")
     return parser.parse_args()
@@ -140,11 +149,21 @@ def stac_search(geometry: dict, start: str, end: str) -> list[dict]:
     method = "POST"
     body = payload
     while True:
-        if method == "POST":
-            response = requests.post(url, json=body, timeout=120)
-        else:
-            response = requests.get(url, params=body, timeout=120)
-        response.raise_for_status()
+        response = None
+        for attempt in range(4):
+            try:
+                if method == "POST":
+                    response = requests.post(url, json=body, timeout=120)
+                else:
+                    response = requests.get(url, params=body, timeout=120)
+                response.raise_for_status()
+                break
+            except requests.RequestException:
+                if attempt == 3:
+                    raise
+                delay = 2**attempt
+                print(f"  STAC request failed; retrying in {delay}s...", flush=True)
+                time.sleep(delay)
         page = response.json()
         features.extend(page.get("features", []))
         print(f"  fetched {len(features)} scenes...", flush=True)
@@ -172,7 +191,9 @@ def plan_dates(args: argparse.Namespace) -> None:
 
     print("Fetching Doha boundary...", flush=True)
     boundary_wgs84, _, boundary_metadata = run_mosaic_module.fetch_boundary(
-        args.max_component_distance_km
+        args.max_component_distance_km,
+        query=args.boundary_query,
+        osm_id=args.osm_id,
     )
     geometry = mapping(boundary_wgs84)
 
@@ -297,36 +318,24 @@ def build_command(
         command.append("--prune-unselected")
     if args.skip_mosaic:
         command.append("--skip-mosaic")
+    command += [
+        "--boundary-query",
+        args.boundary_query,
+        "--osm-id",
+        str(args.osm_id),
+        "--tile-timeout",
+        str(args.tile_timeout),
+    ]
     return command
 
 
-def export_uncompressed(final_dir: Path) -> list[str]:
-    import rasterio
-
-    target = final_dir / "uncompressed"
-    target.mkdir(exist_ok=True)
-    exported = []
-    for source in sorted(final_dir.glob("*.tif")):
-        with rasterio.open(source) as dataset:
-            if dataset.compression is None:
-                continue
-        destination = target / source.name
-        if not destination.exists() or destination.stat().st_size < source.stat().st_size:
-            subprocess.run(
-                [
-                    executable("gdal_translate"),
-                    "-q",
-                    "-co",
-                    "COMPRESS=NONE",
-                    "-co",
-                    "BIGTIFF=YES",
-                    str(source),
-                    str(destination),
-                ],
-                check=True,
-            )
-        exported.append(str(destination))
-    return exported
+def finals_present(output_dir: Path, products: list[str]) -> bool:
+    """Lightweight presence check; run_mosaic re-validates authoritatively."""
+    if not products:
+        return False
+    return all(
+        list(output_dir.glob(f"*_{product}_1m.tif")) for product in products
+    )
 
 
 def load_manifest(base: Path) -> dict:
@@ -347,15 +356,6 @@ def save_manifest(base: Path, manifest: dict) -> None:
     temporary = path.with_suffix(".json.tmp")
     temporary.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     os.replace(temporary, path)
-
-
-def uncompressed_complete(output_dir: Path, products: list[str]) -> bool:
-    target = output_dir / "uncompressed"
-    if not target.is_dir():
-        return False
-    expected = [f"*_{product}_1m.tif" for product in products]
-    found = [path for pattern in expected for path in target.glob(pattern)]
-    return len(found) == len(products)
 
 
 def _pid_command(pid: int) -> str | None:
@@ -468,8 +468,6 @@ def main() -> None:
             "returncode": result.returncode,
             "completed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         }
-        if result.returncode == 0 and args.uncompressed:
-            rec["uncompressed"] = export_uncompressed(output_dir)
         record(entry_date, rec)
         free_gb = shutil.disk_usage(ROOT).free / 1024**3
         print(
@@ -482,9 +480,7 @@ def main() -> None:
         entry_date = entry["date"]
         output_dir, _ = date_paths(entry_date)
         workspace = output_dir / ".work"
-        done = run_mosaic_module.finals_complete(output_dir, selected_products) and (
-            not args.uncompressed or uncompressed_complete(output_dir, selected_products)
-        )
+        done = finals_present(output_dir, selected_products)
         if done:
             record(entry_date, {"state": "completed", "workspace": str(workspace), "output_dir": str(output_dir)})
             continue

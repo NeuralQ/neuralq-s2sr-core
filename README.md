@@ -14,7 +14,7 @@ self-documented.
 ```
 neuralq-s2sr-api/
 ├── README.md                        this document
-├── environment.yml                  conda spec for the s2sr-inference environment
+├── environment.yml                  conda spec for the neuralq-s2sr-api environment
 ├── models/
 │   └── S2SR-GL-20241022.1.pt        decrypted checkpoint        (840,950,460 B)
 ├── s2sr/                            clean-room model package
@@ -29,6 +29,7 @@ neuralq-s2sr-api/
 │   ├── run_location_doha.py         Doha defaults wrapper
 │   ├── run_mosaic.py                resumable tiling engine -> clipped BigTIFFs
 │   └── run_mosaique_doha.py         time-series orchestrator (planning + workers)
+├── tests/                           stdlib-only unit tests (run on any machine)
 └── outputs/                         curated final products only; transient .work/
                                     scratch lives here during runs and is auto-removed
 ```
@@ -36,8 +37,8 @@ neuralq-s2sr-api/
 ## Environment
 
 ```bash
-conda env create -f environment.yml      # recreate s2sr-inference (Python 3.12)
-conda activate s2sr-inference
+conda env create -f environment.yml      # recreate neuralq-s2sr-api (Python 3.12)
+conda activate neuralq-s2sr-api
 ```
 
 The environment provides PyTorch (CUDA), rasterio/GDAL, pyproj, shapely,
@@ -50,8 +51,9 @@ line tools (`gdalbuildvrt`, `gdalwarp`, `gdal_translate`) must be on PATH for
 mosaic assembly. Reference hardware: NVIDIA RTX 4080 16 GB.
 
 Always run the scripts through an activated environment (or `conda run -n
-s2sr-inference ...`) so `CONDA_PREFIX`, `GDAL_DATA`, and `PROJ_DATA` are set
-correctly.
+neuralq-s2sr-api ...`) so `CONDA_PREFIX`, `GDAL_DATA`, and `PROJ_DATA` are set
+correctly. Unit tests are standard-library only and run anywhere:
+`python3 tests/test_pipeline_units.py`.
 
 ## Pipeline Overview
 
@@ -156,8 +158,9 @@ Every raster written anywhere in the repository is `COMPRESS=NONE`. This is
 enforced at three independent layers:
 
 1. **Write time** - explicit `-co COMPRESS=NONE` creation options for mosaics,
-   plus a post-run pass that rewrites *every* engine raster at the array
-   level through rasterio, compressed or not. The rewrite produces a
+   plus a post-run pass that rewrites *every retained* product raster at the
+   array level through rasterio, compressed or not (transient `.work/`
+   scratch is skipped - it is deleted when the run ends). The rewrite produces a
    brand-new file, so no metadata from upstream tooling survives inside
    the binary; band descriptions and nodata are preserved.
 2. **Resume validation** - `run_mosaic.find_products` rejects compressed
@@ -217,7 +220,7 @@ Inference IDs are unique per single-location run (UTC timestamp +
 coordinates + random token). Mosaic IDs derive deterministically from the
 plan signature so reruns resume into the same directory. Country codes come
 from Nominatim reverse geocoding with a persistent disk cache
-(`~/.cache/s2sr/geo_cache.json`) and can be forced with `--country-code`.
+(`~/.cache/neuralq-s2sr-api/geo_cache.json`) and can be forced with `--country-code`.
 
 Each `README.md` records run coordinates and timestamps, model identity and
 checkpoint SHA-256, the data contract, a per-file inventory with sizes and
@@ -255,7 +258,7 @@ A full set adds roughly 1 GB per inference (15 files x ~67 MB).
 ## Single Location
 
 ```bash
-conda activate s2sr-inference
+conda activate neuralq-s2sr-api
 
 # scene availability only (no downloads, no GPU work)
 python scripts/run_location_doha.py --search-only
@@ -276,6 +279,7 @@ python scripts/run_location.py \
   [--search-only] [--no-preview] \
   [--products MS TCI NDVI IRP] [--skip-indices] \
   [--country-code QA] [--inference-id my-id] \
+  [--min-free-gb 40] \
   [--output PATH | --output-root PATH]
 ```
 
@@ -351,13 +355,23 @@ python scripts/run_mosaic.py                      # organized default output
 
 python scripts/run_mosaic.py \
   --products MS --prune-unselected                # strict MS-only variant
+
+# any other city: pick a boundary by Nominatim query (+ optional OSM id);
+# the local UTM zone is derived automatically from the boundary centroid
+python scripts/run_mosaic.py \
+  --boundary-query "Lyon, France" --osm-id 35238 \
+  --country-code FR
 ```
 
 Rerunning the same command validates and skips completed tiles, then resumes
-incomplete work; once finals exist, reruns are a no-op. Each accepted source tile must be exactly `4120 x 4120`,
-ten-band `uint16`, EPSG:32639 at 1 m; the clipped Doha MS BigTIFF is
+incomplete work; when finals exist they are fully re-validated and the run is
+an immediate no-op only if every raster passes. Each accepted source tile must be exactly `4120 x 4120`,
+ten-band `uint16`, in the boundary's auto-detected UTM zone at 1 m; the clipped Doha MS BigTIFF is
 `25271 x 26869` at 1 m (13.58 GB logical). Budget roughly 37 GB per date
 of peak working state; `--plan-only` writes just the manifest.
+Fetched boundaries are cached under `outputs/.boundaries/` so resumes are
+immune to upstream OpenStreetMap geometry edits - delete that folder to
+force a refresh.
 
 ## Time Series
 
@@ -393,6 +407,8 @@ locks, per-tile products) in a hidden `.work/` directory inside its own
 - rerunning a mosaic whose finals already validate is an immediate no-op.
 
 The only long-lived auxiliary artifacts are the time-series planning files
-in `outputs/doha_timeseries/` (`dates.json`, `timeseries.json`). Deleting
+in `outputs/doha_timeseries/` (`dates.json`, `timeseries.json`) and the
+boundary cache under `outputs/.boundaries/` (delete it to force a fresh
+Nominatim fetch). Deleting
 `.work/` manually never loses final results; it only discards resumable
 progress for that mosaic.

@@ -1,27 +1,31 @@
 #!/usr/bin/env python3
-"""Build a resumable S2SR mosaic over the Doha municipality.
+"""Build a resumable S2SR mosaic over an administrative boundary.
 
-Fetches the OpenStreetMap boundary (relation 27332, offshore components
-beyond ``--max-component-distance-km`` excluded), grids it into overlapping
+Fetches an OpenStreetMap boundary via Nominatim (``--boundary-query``,
+filtered to ``--osm-id``, offshore components beyond
+``--max-component-distance-km`` excluded), grids it into overlapping
 4.12 km tiles on a 4 km step, and processes tiles center-out through
-per-tile subprocesses of ``run_location.py``. Every product is strictly
-validated (dimensions, bands, dtype, CRS, resolution, compression) before
-being recorded in an atomically written manifest; finished tiles are skipped
-on rerun. When all tiles are complete the runner assembles boundary-clipped,
-uncompressed BigTIFFs per product via VRT + gdalwarp, adds a downsampled
-uncompressed GeoTIFF preview, writes a metadata README, and then removes its
-transient ``.work/`` directory inside the output folder.
+per-tile subprocesses of ``run_location.py``. The local UTM zone is derived
+automatically from the boundary centroid, so any city works - the default
+query remains Doha. Every product is strictly validated (dimensions, bands,
+dtype, CRS, resolution, compression) before being recorded in an atomically
+written manifest; finished tiles are skipped on rerun. The fetched boundary
+is cached under ``outputs/.boundaries/`` so resumed runs are immune to
+upstream geometry edits. When all tiles are complete the runner assembles
+boundary-clipped, uncompressed BigTIFFs per product via VRT + gdalwarp,
+adds a downsampled uncompressed GeoTIFF preview, writes a metadata README,
+and then removes its transient ``.work/`` directory inside the output folder.
 
 All state lives in ``<output_dir>/.work/`` (manifest, boundary, per-tile
 products, caches, locks). Interrupted runs resume by rerunning the same
-command; once the mosaic completes, only final products remain. If the
-final rasters are already present and validated, rerunning is a no-op.
+command; once the mosaic completes and validates, rerunning is a no-op.
 
 Usage::
 
     python scripts/run_mosaic.py \
         [--date 2026-08-14] [--products MS TCI] [--prune-unselected] \
-        [--plan-only] [--skip-mosaic]
+        [--plan-only] [--skip-mosaic] \
+        [--boundary-query "Lyon, France"] [--osm-id 12345]
 """
 import sys
 
@@ -37,6 +41,7 @@ import shutil
 import subprocess
 import sys
 import time
+from urllib.parse import urlencode
 
 from pyproj import Transformer
 import rasterio
@@ -56,12 +61,10 @@ from output_layout import (
 
 
 ROOT = Path(__file__).resolve().parents[1]
-NOMINATIM_URL = (
-    "https://nominatim.openstreetmap.org/search"
-    "?q=Doha%2C+Qatar&format=geojson&polygon_geojson=1&limit=5"
-)
-DOHA_RELATION_ID = 27332
-UTM_CRS = "EPSG:32639"
+NOMINATIM_SEARCH_URL = "https://nominatim.openstreetmap.org/search"
+DEFAULT_BOUNDARY_QUERY = "Doha, Qatar"
+DEFAULT_OSM_ID = 27332
+TILE_TIMEOUT_DEFAULT = 1800
 PRODUCTS = {"MS": 10, "TCI": 3, "NDVI": 3, "IRP": 3}
 PRODUCT_DTYPES = {"MS": "uint16", "TCI": "uint8", "NDVI": "uint8", "IRP": "uint8"}
 GRID_STEP_DEFAULT = 4000.0
@@ -87,6 +90,13 @@ def mosaic_inference_id(
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def utm_crs_for(longitude: float, latitude: float) -> str:
+    """Return the WGS84 UTM zone covering a point, north or south."""
+    zone = int((longitude + 180) // 6) + 1
+    band = 326 if latitude >= 0 else 327
+    return f"EPSG:{band * 100 + zone}"
 
 
 def parse_args() -> argparse.Namespace:
@@ -136,6 +146,23 @@ def parse_args() -> argparse.Namespace:
         default=20,
         help="Exclude detached administrative islands farther from mainland Doha",
     )
+    parser.add_argument(
+        "--boundary-query",
+        default=DEFAULT_BOUNDARY_QUERY,
+        help="Nominatim query selecting the administrative boundary to mosaic",
+    )
+    parser.add_argument(
+        "--osm-id",
+        type=int,
+        default=DEFAULT_OSM_ID,
+        help="Keep only the Nominatim feature with this OSM id (0 keeps the first result)",
+    )
+    parser.add_argument(
+        "--tile-timeout",
+        type=int,
+        default=TILE_TIMEOUT_DEFAULT,
+        help="Kill a tile subprocess that exceeds this many seconds",
+    )
     parser.add_argument("--plan-only", action="store_true")
     parser.add_argument("--skip-mosaic", action="store_true")
     return parser.parse_args()
@@ -147,20 +174,34 @@ def write_json(path: Path, value: dict) -> None:
     os.replace(temporary, path)
 
 
-def fetch_boundary(max_distance_km: float) -> tuple[MultiPolygon, MultiPolygon, dict]:
+def fetch_boundary(
+    max_distance_km: float,
+    query: str = DEFAULT_BOUNDARY_QUERY,
+    osm_id: int = DEFAULT_OSM_ID,
+) -> tuple[MultiPolygon, MultiPolygon, dict]:
+    params = {"q": query, "format": "geojson", "polygon_geojson": "1", "limit": 5}
     response = requests.get(
-        NOMINATIM_URL,
+        f"{NOMINATIM_SEARCH_URL}?{urlencode(params)}",
         headers={"User-Agent": "s2sr-mosaic/1.0"},
         timeout=120,
     )
     response.raise_for_status()
-    feature = next(
-        item
-        for item in response.json()["features"]
-        if item["properties"].get("osm_id") == DOHA_RELATION_ID
-    )
-    boundary_wgs84 = shape(feature["geometry"])
-    to_utm = Transformer.from_crs("EPSG:4326", UTM_CRS, always_xy=True)
+    features = response.json()["features"]
+    if osm_id:
+        features = [
+            item
+            for item in features
+            if item["properties"].get("osm_id") == osm_id
+        ]
+    if not features:
+        raise RuntimeError(
+            f"Nominatim returned no boundary for query {query!r}"
+            + (f" with osm_id {osm_id}" if osm_id else "")
+        )
+    boundary_wgs84 = shape(features[0]["geometry"])
+    centroid = boundary_wgs84.centroid
+    crs = utm_crs_for(centroid.x, centroid.y)
+    to_utm = Transformer.from_crs("EPSG:4326", crs, always_xy=True)
     boundary_utm = transform(to_utm.transform, boundary_wgs84)
 
     components = sorted(boundary_utm.geoms, key=lambda geometry: geometry.area, reverse=True)
@@ -173,12 +214,13 @@ def fetch_boundary(max_distance_km: float) -> tuple[MultiPolygon, MultiPolygon, 
     excluded = [component for component in components if component not in retained]
     filtered_utm = unary_union(retained)
 
-    to_wgs84 = Transformer.from_crs(UTM_CRS, "EPSG:4326", always_xy=True)
+    to_wgs84 = Transformer.from_crs(crs, "EPSG:4326", always_xy=True)
     filtered_wgs84 = transform(to_wgs84.transform, filtered_utm)
     metadata = {
         "source": "OpenStreetMap/Nominatim",
-        "osm_relation": DOHA_RELATION_ID,
-        "crs": UTM_CRS,
+        "osm_relation": osm_id,
+        "boundary_query": query,
+        "crs": crs,
         "area_km2": round(filtered_utm.area / 1_000_000, 3),
         "component_count": len(retained),
         "excluded_component_count": len(excluded),
@@ -193,7 +235,7 @@ def fetch_boundary(max_distance_km: float) -> tuple[MultiPolygon, MultiPolygon, 
 def save_boundary(path: Path, boundary, metadata: dict) -> None:
     feature_collection = {
         "type": "FeatureCollection",
-        "name": "Doha municipality (local components)",
+        "name": "Municipality boundary (local components)",
         "features": [
             {
                 "type": "Feature",
@@ -205,10 +247,51 @@ def save_boundary(path: Path, boundary, metadata: dict) -> None:
     write_json(path, feature_collection)
 
 
+def boundary_cache_path(query: str, osm_id: int, max_distance_km: float) -> Path:
+    slug = plan_signature(
+        query=query,
+        osm_id=osm_id,
+        max_component_distance_km=max_distance_km,
+    )
+    return ROOT / "outputs" / ".boundaries" / f"{slug}.geojson"
+
+
+def load_boundary_cache(
+    path: Path,
+) -> tuple[MultiPolygon, MultiPolygon, dict]:
+    collection = json.loads(path.read_text(encoding="utf-8"))
+    feature = collection["features"][0]
+    metadata = dict(feature.get("properties", {}))
+    crs = metadata["crs"]
+    boundary_wgs84 = shape(feature["geometry"])
+    to_utm = Transformer.from_crs("EPSG:4326", crs, always_xy=True)
+    return boundary_wgs84, transform(to_utm.transform, boundary_wgs84), metadata
+
+
+def load_or_fetch_boundary(
+    query: str,
+    osm_id: int,
+    max_distance_km: float,
+) -> tuple[MultiPolygon, MultiPolygon, dict, bool]:
+    """Return (wgs84, utm, metadata, was_cached); caches every fresh fetch."""
+    cache = boundary_cache_path(query, osm_id, max_distance_km)
+    if cache.is_file():
+        try:
+            wgs84, utm, metadata = load_boundary_cache(cache)
+            return wgs84, utm, metadata, True
+        except Exception:
+            pass
+    wgs84, utm, metadata = fetch_boundary(max_distance_km, query, osm_id)
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    save_boundary(cache, wgs84, metadata)
+    return wgs84, utm, metadata, False
+
+
 def make_tiles(
     boundary_utm,
     grid_step: float,
     footprint: float,
+    utm_crs: str,
 ) -> list[dict]:
     min_x, min_y, max_x, max_y = boundary_utm.bounds
     half = footprint / 2
@@ -240,7 +323,7 @@ def make_tiles(
         row += 1
 
     candidates.sort(key=lambda tile: tile["priority"])
-    to_wgs84 = Transformer.from_crs(UTM_CRS, "EPSG:4326", always_xy=True)
+    to_wgs84 = Transformer.from_crs(utm_crs, "EPSG:4326", always_xy=True)
     tiles = []
     for index, tile in enumerate(candidates, start=1):
         longitude, latitude = to_wgs84.transform(tile["easting"], tile["northing"])
@@ -265,7 +348,7 @@ def make_tiles(
     return tiles
 
 
-def expected_raster(boundary_utm, products: list[str]) -> dict:
+def expected_raster(boundary_utm, products: list[str], utm_crs: str) -> dict:
     min_x, min_y, max_x, max_y = boundary_utm.bounds
     aligned_bounds = [
         math.floor(min_x),
@@ -276,7 +359,7 @@ def expected_raster(boundary_utm, products: list[str]) -> dict:
     width = aligned_bounds[2] - aligned_bounds[0]
     height = aligned_bounds[3] - aligned_bounds[1]
     return {
-        "crs": UTM_CRS,
+        "crs": utm_crs,
         "resolution_meters": 1,
         "bounds": aligned_bounds,
         "width": width,
@@ -337,7 +420,7 @@ def load_or_create_manifest(
         "boundary": boundary_metadata,
         "workspace": str(workspace),
         "grid": {
-            "crs": UTM_CRS,
+            "crs": expected["crs"],
             "step_meters": options.grid_step,
             "tile_footprint_meters": options.tile_footprint,
             "tile_count": len(tiles),
@@ -359,7 +442,10 @@ def save_manifest(workspace: Path, manifest: dict) -> None:
     write_json(workspace / "manifest.json", manifest)
 
 
-def find_products(tile_output: Path, selected_products: list[str]) -> dict[str, str]:
+def find_products(
+    tile_output: Path, selected_products: list[str], utm_crs: str
+) -> dict[str, str]:
+    expected_epsg = int(utm_crs.split(":")[1])
     products = {}
     for product in selected_products:
         band_count = PRODUCTS[product]
@@ -375,8 +461,13 @@ def find_products(tile_output: Path, selected_products: list[str]) -> dict[str, 
                 raise RuntimeError(
                     f"{path.name} has {dataset.count} bands; expected {band_count}"
                 )
-            if dataset.crs is None or dataset.crs.to_epsg() != 32639:
-                raise RuntimeError(f"{path.name} has unexpected CRS {dataset.crs}")
+            if (
+                dataset.crs is None
+                or dataset.crs.to_epsg() != expected_epsg
+            ):
+                raise RuntimeError(
+                    f"{path.name} has unexpected CRS {dataset.crs}; expected {utm_crs}"
+                )
             if dataset.width != 4120 or dataset.height != 4120:
                 raise RuntimeError(
                     f"{path.name} has unexpected dimensions "
@@ -398,6 +489,7 @@ def run_tile(
     workspace: Path,
     options: argparse.Namespace,
     tile: dict,
+    utm_crs: str,
 ) -> tuple[bool, str | None]:
     tile_output = workspace / "tiles" / tile["id"]
     tile_log = workspace / "logs" / f"{tile['id']}.log"
@@ -421,25 +513,32 @@ def run_tile(
     environment = os.environ.copy()
     environment["PYTHONUNBUFFERED"] = "1"
     started = time.monotonic()
+    timed_out = None
     with tile_log.open("a", encoding="utf-8") as log:
         log.write(f"\n[{utc_now()}] command: {' '.join(command)}\n")
         log.flush()
-        result = subprocess.run(
-            command,
-            cwd=ROOT,
-            env=environment,
-            stdout=log,
-            stderr=subprocess.STDOUT,
-            text=True,
-        )
+        try:
+            result = subprocess.run(
+                command,
+                cwd=ROOT,
+                env=environment,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                text=True,
+                timeout=options.tile_timeout,
+            )
+        except subprocess.TimeoutExpired as error:
+            timed_out = error
     tile["duration_seconds"] = round(
         (tile.get("duration_seconds") or 0) + time.monotonic() - started,
         1,
     )
+    if timed_out is not None:
+        return False, f"timed out after {options.tile_timeout}s"
     if result.returncode != 0:
         return False, f"run_location exited with status {result.returncode}"
     try:
-        tile["products"] = find_products(tile_output, options.products)
+        tile["products"] = find_products(tile_output, options.products, utm_crs)
     except Exception as error:
         return False, str(error)
 
@@ -461,8 +560,11 @@ def executable(name: str) -> str:
     return path
 
 
-def validate_final_raster(path: Path, product: str, expected: dict) -> dict:
+def validate_final_raster(
+    path: Path, product: str, expected: dict, utm_crs: str
+) -> dict:
     specification = expected["products"][product]
+    expected_epsg = int(utm_crs.split(":")[1])
     with rasterio.open(path) as dataset:
         observed_bounds = [round(value) for value in dataset.bounds]
         errors = []
@@ -472,7 +574,7 @@ def validate_final_raster(path: Path, product: str, expected: dict) -> dict:
             errors.append(f"bands={dataset.count}")
         if dataset.dtypes != (specification["dtype"],) * specification["bands"]:
             errors.append(f"dtypes={dataset.dtypes}")
-        if dataset.crs is None or dataset.crs.to_epsg() != 32639:
+        if dataset.crs is None or dataset.crs.to_epsg() != expected_epsg:
             errors.append(f"crs={dataset.crs}")
         if dataset.res != (1.0, 1.0):
             errors.append(f"resolution={dataset.res}")
@@ -503,11 +605,24 @@ def validate_final_raster(path: Path, product: str, expected: dict) -> dict:
         }
 
 
-def finals_complete(output_dir: Path, products: list[str]) -> bool:
+def finals_complete(
+    output_dir: Path,
+    products: list[str],
+    expected: dict,
+    utm_crs: str,
+) -> bool:
+    """True only when every final exists AND passes full raster validation."""
+    if not products:
+        return False
     for product in products:
-        if not list(Path(output_dir).glob(f"*_{product}_1m.tif")):
+        matches = list(Path(output_dir).glob(f"*_{product}_1m.tif"))
+        if len(matches) != 1:
             return False
-    return bool(products)
+        try:
+            validate_final_raster(matches[0], product, expected, utm_crs)
+        except Exception:
+            return False
+    return True
 
 
 def build_mosaic(
@@ -515,6 +630,7 @@ def build_mosaic(
     manifest: dict,
     boundary_path: Path,
     final_dir: Path,
+    utm_crs: str,
 ) -> None:
     final_dir.mkdir(exist_ok=True)
     compact_date = manifest["date"].replace("-", "")
@@ -524,16 +640,15 @@ def build_mosaic(
         sources = [tile["products"][product] for tile in manifest["tiles"]]
         vrt = final_dir / f"Doha_{compact_date}_{product}.vrt"
         destination = final_dir / f"Doha_{compact_date}_S2SR_{product}_1m.tif"
+        vrt_options = ["-overwrite", "-resolution", "highest"]
+        if product != "MS":
+            # Zero is a legitimate reflectance DN; treat it as nodata only in
+            # the uint8 visualization products, never in the scientific MS.
+            vrt_options += ["-srcnodata", "0", "-vrtnodata", "0"]
         subprocess.run(
             [
                 executable("gdalbuildvrt"),
-                "-overwrite",
-                "-resolution",
-                "highest",
-                "-srcnodata",
-                "0",
-                "-vrtnodata",
-                "0",
+                *vrt_options,
                 str(vrt),
                 *sources,
             ],
@@ -581,6 +696,7 @@ def build_mosaic(
             destination,
             product,
             manifest["expected_raster"],
+            utm_crs,
         )
         vrt.unlink()
         print(f"Mosaic {product} ready: {destination}", flush=True)
@@ -689,13 +805,24 @@ def main() -> None:
         raise SystemExit("--tile-size must be at least 16")
     datetime.strptime(options.date, "%Y-%m-%d")
 
-    boundary_wgs84, boundary_utm, boundary_metadata = fetch_boundary(
-        options.max_component_distance_km
+    boundary_wgs84, boundary_utm, boundary_metadata, boundary_cached = (
+        load_or_fetch_boundary(
+            options.boundary_query,
+            options.osm_id,
+            options.max_component_distance_km,
+        )
     )
+    utm_crs = boundary_metadata["crs"]
+    if boundary_cached:
+        print(
+            f"Boundary: reusing cached {boundary_cache_path(options.boundary_query, options.osm_id, options.max_component_distance_km).name} "
+            "(delete outputs/.boundaries/ to refresh)",
+            flush=True,
+        )
     if options.output_dir is not None:
         output_dir = options.output_dir.resolve()
     else:
-        to_wgs84 = Transformer.from_crs(UTM_CRS, "EPSG:4326", always_xy=True)
+        to_wgs84 = Transformer.from_crs(utm_crs, "EPSG:4326", always_xy=True)
         centroid = boundary_utm.centroid
         center_lon, center_lat = to_wgs84.transform(centroid.x, centroid.y)
         code = (
@@ -711,9 +838,12 @@ def main() -> None:
         output_root = (options.output_root or ROOT / "outputs").resolve()
         output_dir = inference_directory(output_root, code, options.date, inference_id)
     output_dir.mkdir(parents=True, exist_ok=True)
+    expected = expected_raster(boundary_utm, options.products, utm_crs)
 
-    if not options.skip_mosaic and finals_complete(output_dir, options.products):
-        print(f"Mosaic already complete: {output_dir}", flush=True)
+    if not options.skip_mosaic and finals_complete(
+        output_dir, options.products, expected, utm_crs
+    ):
+        print(f"Mosaic already complete and validated: {output_dir}", flush=True)
         return
 
     workspace = output_dir / ".work"
@@ -736,8 +866,7 @@ def main() -> None:
 
     boundary_path = workspace / "boundary.geojson"
     save_boundary(boundary_path, boundary_wgs84, boundary_metadata)
-    tiles = make_tiles(boundary_utm, options.grid_step, options.tile_footprint)
-    expected = expected_raster(boundary_utm, options.products)
+    tiles = make_tiles(boundary_utm, options.grid_step, options.tile_footprint, utm_crs)
     manifest = load_or_create_manifest(
         workspace, options, boundary_metadata, tiles, expected, output_dir
     )
@@ -760,7 +889,7 @@ def main() -> None:
     for position, tile in enumerate(manifest["tiles"], start=1):
         try:
             existing_products = find_products(
-                workspace / "tiles" / tile["id"], options.products
+                workspace / "tiles" / tile["id"], options.products, utm_crs
             )
         except Exception:
             existing_products = None
@@ -788,7 +917,7 @@ def main() -> None:
                 f"{tile['longitude']:.5f},{tile['latitude']:.5f}",
                 flush=True,
             )
-            success, error = run_tile(workspace, options, tile)
+            success, error = run_tile(workspace, options, tile, utm_crs)
             if success:
                 tile["status"] = "completed"
                 tile["completed_at"] = utc_now()
@@ -817,7 +946,7 @@ def main() -> None:
     if not options.skip_mosaic:
         manifest["state"] = "mosaicking"
         save_manifest(workspace, manifest)
-        build_mosaic(workspace, manifest, boundary_path, output_dir)
+        build_mosaic(workspace, manifest, boundary_path, output_dir, utm_crs)
 
     manifest["state"] = "completed"
     manifest["completed_at"] = utc_now()

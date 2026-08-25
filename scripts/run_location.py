@@ -32,6 +32,7 @@ import sys
 from types import SimpleNamespace
 
 from output_layout import (
+    BAND_ORDER,
     country_code,
     inference_directory,
     new_inference_id,
@@ -45,7 +46,6 @@ from output_layout import (
 ROOT = Path(__file__).resolve().parents[1]
 MODEL_ID = "S2SR-GL-20241022.1"
 DEFAULT_MODEL = ROOT / "models" / f"{MODEL_ID}.pt"
-BAND_ORDER = ("B02", "B03", "B04", "B08", "B05", "B06", "B07", "B11", "B12", "B8A")
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -85,6 +85,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=int,
         default=128,
         help="Input tile width; smaller values reduce peak GPU memory",
+    )
+    parser.add_argument(
+        "--min-free-gb",
+        type=float,
+        default=40.0,
+        help="Abort before starting when free disk at the output location is lower",
     )
     parser.add_argument(
         "--search-only",
@@ -133,6 +139,16 @@ def main(argv: list[str] | None = None) -> None:
         )
         output_root = (options.output_root or ROOT / "outputs").resolve()
         output_dir = inference_directory(output_root, code, options.date, inference_id)
+
+    anchor = output_dir
+    while not anchor.exists():
+        anchor = anchor.parent
+    free_gb = shutil.disk_usage(anchor).free / 1024**3
+    if free_gb < options.min_free_gb:
+        raise SystemExit(
+            f"Insufficient disk space: {free_gb:.1f} GB free at {anchor}, "
+            f"--min-free-gb {options.min_free_gb:g} required"
+        )
 
     work_dir = output_dir / ".work"
     data_dir = work_dir / "data"
@@ -277,6 +293,11 @@ def _run(
 
     def normalize_products() -> None:
         for path in sorted(output_dir.rglob("*.tif")):
+            if any(
+                part.startswith(".")
+                for part in path.relative_to(output_dir).parts
+            ):
+                continue
             branded_name = sanitize_token(path.name)
             dataset = gdal.Open(str(path), gdal.GA_Update)
             if dataset is None:
@@ -316,7 +337,7 @@ def _run(
             path.unlink()
 
     def ensure_uncompressed(tree: Path) -> None:
-        for path in sorted(tree.rglob("*.tif")):
+        for path in sorted(tree.glob("*.tif")):
             with rasterio.open(path) as source:
                 profile = source.profile.copy()
                 data = source.read()
@@ -412,12 +433,12 @@ def _run(
         date=options.date,
         simulate=False,
     )
-    ensure_uncompressed(output_dir)
     normalize_products()
     for path in sorted(output_dir.rglob("*.aux.xml")):
         path.unlink()
     sources = flatten_products()
     removed = prune_products(set(options.products))
+    ensure_uncompressed(output_dir)
 
     from spectral_indices import compute_indices, write_indices_readme
 

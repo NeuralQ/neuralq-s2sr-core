@@ -2,7 +2,7 @@
 
 NeuralQ S2SR drives a compiled geospatial engine (STAC access,
 co-registration, tiled product I/O) shipped as a prebuilt wheel installed
-inside the ``s2sr-inference`` conda environment. This module is the only
+inside the ``neuralq-s2sr-api`` conda environment. This module is the only
 file in the repository that references that engine's distribution
 identifiers; every other module speaks pure NeuralQ/S2SR naming.
 

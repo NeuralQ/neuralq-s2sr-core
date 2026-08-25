@@ -11,10 +11,13 @@ from pathlib import Path
 GEO_CACHE = Path(
     os.environ.get(
         "S2SR_GEO_CACHE",
-        str(Path.home() / ".cache" / "s2sr" / "geo_cache.json"),
+        str(Path.home() / ".cache" / "neuralq-s2sr-api" / "geo_cache.json"),
     )
 )
 NOMINATIM_REVERSE_URL = "https://nominatim.openstreetmap.org/reverse"
+
+BAND_ORDER = ("B02", "B03", "B04", "B08", "B05", "B06", "B07", "B11", "B12", "B8A")
+DN_DIVISOR = 10_000
 
 
 def utc_now() -> str:
@@ -62,7 +65,7 @@ def _cache_save(cache: dict) -> None:
 def country_code(latitude: float, longitude: float) -> str:
     import requests
 
-    key = f"{latitude:.2f},{longitude:.2f}"
+    key = f"{latitude:.5f},{longitude:.5f}"
     cache = _cache_load()
     if key in cache:
         return cache[key]

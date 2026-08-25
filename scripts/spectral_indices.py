@@ -7,8 +7,7 @@ from pathlib import Path
 import numpy as np
 import rasterio
 
-
-BAND_ORDER = ("B02", "B03", "B04", "B08", "B05", "B06", "B07", "B11", "B12", "B8A")
+from output_layout import BAND_ORDER, DN_DIVISOR
 
 CATEGORIES: dict[str, list[str]] = {
     "vegetation": ["ndvi", "gndvi", "ndre", "evi2", "savi", "mtci"],
@@ -126,7 +125,7 @@ def compute_indices(ms_path: Path, destination: Path, categories=None) -> list[d
         profile = source.profile.copy()
 
     reflectance = {
-        name: dn[index - 1] / 10_000.0
+        name: dn[index - 1] / float(DN_DIVISOR)
         for index, name in enumerate(BAND_ORDER, start=1)
     }
 

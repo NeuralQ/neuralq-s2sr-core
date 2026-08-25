@@ -120,9 +120,7 @@ def main(argv: list[str] | None = None) -> None:
     target_date = datetime.strptime(options.date, "%Y-%m-%d").strftime("%Y%m%d")
     model_path = options.model.resolve()
     if not model_path.is_file():
-        raise SystemExit(
-            f"Model not found: {model_path}\nRun: python scripts/download_weights.py"
-        )
+        raise SystemExit(f"Model not found: {model_path}")
 
     if options.output is not None:
         output_dir = options.output.resolve()

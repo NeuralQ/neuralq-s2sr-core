@@ -28,11 +28,7 @@ neuralq-s2sr-api/
 │   ├── run_location.py              single-location inference pipeline
 │   ├── run_location_doha.py         Doha defaults wrapper
 │   ├── run_mosaic.py                resumable tiling engine -> clipped BigTIFFs
-│   ├── run_mosaique_doha.py         time-series orchestrator (planning + workers)
-│   ├── mosaic_status.py             live mosaic progress reader
-│   ├── catalog_outputs.py           strict inventory/validation of outputs/
-│   ├── analyze_model.py             architecture/checkpoint reports
-│   └── verify_local.py              checkpoint + golden-fingerprint verification
+│   └── run_mosaique_doha.py         time-series orchestrator (planning + workers)
 └── outputs/                         curated final products only; transient .work/
                                     scratch lives here during runs and is auto-removed
 ```
@@ -61,9 +57,7 @@ correctly.
 
 ```mermaid
 flowchart TD
-    DL["scripts/download_weights.py"] --> CKPT["models/S2SR-GL-20241022.1.pt"]
-    CKPT --> VF["scripts/verify_local.py<br/>checkpoint SHA-256<br/>105,055,800 parameters<br/>golden fingerprint"]
-    VF --> RL["scripts/run_location.py"]
+    CKPT["models/S2SR-GL-20241022.1.pt"] --> RL["scripts/run_location.py"]
     RL --> STAC["Earth Search STAC<br/>rank by recency + clouds"]
     STAC --> VEN["compiled engine<br/>download, co-register,<br/>five dates x ten bands = 50 ch"]
     VEN --> INF["S2SRNet on GPU<br/>105M parameters<br/>N x 50 x H x W -> N x 10 x 10H x 10W"]
@@ -86,9 +80,6 @@ graph LR
     RL --> SI["spectral_indices.py"]
     RL -. "engine boundary" .-> UP["upstream.py"]
     RM --> OL
-    CAT["catalog_outputs.py"] -. validates .-> OUT[("outputs/")]
-    STA["mosaic_status.py"] -. reads .-> MAN[("outputs/**/.work/manifest.json")]
-    ANA["analyze_model.py"] -. reads .-> CKPT[("models/*.pt")]
 ```
 
 ## Recovered Network
@@ -126,27 +117,23 @@ result = super_resolve_dn(model, stack)             # (10, 320, 320) uint16
 
 ## Weights
 
-The published weights object is CMS/SMIME-encrypted. The engine retrieves a
-small password-protected ZIP containing an RSA private key and calls OpenSSL;
-`scripts/download_weights.py` reproduces that process with integrity gates at
-every step (resumable download, size + MD5 on the encrypted object,
-SHA-256 on the plaintext).
+The checkpoint shipped under `models/` is the decrypted form of the
+published CMS/SMIME-encrypted weights object (retrievable via the engine's
+key-retrieval process: a password-protected ZIP holding an RSA private key
+plus OpenSSL decryption). Integrity gates applied at acquisition time:
+resumable download, size + MD5 on the encrypted object, SHA-256 on the
+plaintext.
 
 | Artifact | Size | Digest |
 | --- | ---: | --- |
 | Encrypted CMS | 840,950,890 B | MD5 `c5819380a26f978ff15d8385b27a7b50` |
 | Decrypted checkpoint | 840,950,460 B | SHA-256 `1ac3d52cac3737842538ed09f329b0023b43cd3d5f509ccce36a0951cb2dd520` |
 
-```bash
-conda activate s2sr-inference
-python scripts/download_weights.py          # skip when models/*.pt already verifies
-python scripts/verify_local.py              # pinned checkpoint, parameters, golden fingerprint
-```
+The stored checkpoint matches that pinned SHA-256; verify with:
 
-`verify_local.py` checks the checkpoint SHA-256, the exact parameter count,
-and a fixed forward pass against a pinned golden fingerprint (mean/std/min/max
-of the output tensor, recorded on the reference machine with tight tolerances
-that absorb BLAS nondeterminism across hardware).
+```bash
+shasum -a 256 models/S2SR-GL-20241022.1.pt   # Linux: sha256sum
+```
 
 ## Data Contract
 
@@ -166,7 +153,7 @@ that absorb BLAS nondeterminism across hardware).
 ## Uncompressed Policy
 
 Every raster written anywhere in the repository is `COMPRESS=NONE`. This is
-enforced at four independent layers:
+enforced at three independent layers:
 
 1. **Write time** - explicit `-co COMPRESS=NONE` creation options for mosaics,
    plus a post-run pass that rewrites *every* engine raster at the array
@@ -176,8 +163,6 @@ enforced at four independent layers:
 2. **Resume validation** - `run_mosaic.find_products` rejects compressed
    tiles, forcing regeneration instead of silent reuse.
 3. **Final validation** - finished mosaics fail validation if compressed.
-4. **Catalog** - `catalog_outputs.py --strict` fails on any compressed or
-   malformed product, covering `.tif` products and `.tiff` indices.
 
 Previews included: the mosaic preview is an uncompressed GeoTIFF, not PNG.
 Spectral indices are single-band `float32` with `NoData = NaN`.
@@ -366,8 +351,6 @@ python scripts/run_mosaic.py                      # organized default output
 
 python scripts/run_mosaic.py \
   --products MS --prune-unselected                # strict MS-only variant
-
-python scripts/mosaic_status.py                  # progress of the default workspace
 ```
 
 Rerunning the same command validates and skips completed tiles, then resumes
@@ -394,21 +377,6 @@ Planning and journal live in `outputs/doha_timeseries/`
 keep `--workers 1` unless you have verified isolation of the engine's
 `/tmp` scratch between processes; new dates stop scheduling
 when free disk drops below `--min-free-gb` (default 100).
-
-## Cataloging and Analysis
-
-```bash
-python scripts/catalog_outputs.py --strict        # json+csv inventory, nonzero exit on any invalid product
-python scripts/analyze_model.py                   # reports/s2sr_model/: REPORT.md, architecture.json, checkpoint.json, state_dict.csv
-python scripts/verify_local.py                    # pinned checkpoint SHA-256, parameter count, golden fingerprint
-```
-
-`catalog_outputs.py` recognizes four canonical shapes: flat products
-(`MS.tif`, `TCI.tif`, `NDVI.tif`, `IRP.tif`), prefixed scene products
-(`S2SR_<scene>_<PRODUCT>.tif`), mosaic finals (`*_S2SR_<PRODUCT>_1m.tif`
-plus `*_preview.tif`), and spectral indices (`*.tiff` under
-`indices/`). It checks names, band counts, dtypes, resolution, size class,
-CRS, and compression, and computes SHA-256 unless `--no-hash`.
 
 ## Working State
 

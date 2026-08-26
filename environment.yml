@@ -3,6 +3,9 @@ channels:
   - defaults
   - conda-forge
 dependencies:
+  # pip must be an explicit conda dependency so the `pip:` section below is
+  # installed with this environment's own interpreter.
+  - pip
   - _libgcc_mutex=0.1=main
   - _openmp_mutex=5.1=52_gnu
   - _python_abi3_support=1.0=hd8ed1ab_3

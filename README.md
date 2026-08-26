@@ -30,7 +30,7 @@ resumable pipeline.
 | Input | `N x 50 x H x W`, reflectance DN / 10000 |
 | Output | `N x 10 x 10H x 10W`, uint16 (clamped) |
 | Parameters | 105,055,800 |
-| Checkpoint | `models/S2SR-GL-20241022.1.pt` |
+| Checkpoint | `models/s2sr-v3.0.0.pt` |
 | Checkpoint SHA-256 | `1ac3d52cac3737842538ed09f329b0023b43cd3d5f509ccce36a0951cb2dd520` |
 
 Band order (per date): `B02 B03 B04 B08 B05 B06 B07 B11 B12 B8A`.
@@ -49,7 +49,7 @@ Python API:
 ```python
 from s2sr import load_model, super_resolve_dn
 
-model = load_model("models/S2SR-GL-20241022.1.pt", device="cuda")
+model = load_model("models/s2sr-v3.0.0.pt", device="cuda")
 sr = super_resolve_dn(model, stack_dn)   # (50, H, W) uint16 -> (10, 10H, 10W) uint16
 ```
 
@@ -75,6 +75,8 @@ neuralq-s2sr-core/
 ## Requirements
 
 - Linux x86_64, CUDA GPU (reference: RTX 4080 16 GB), ~40 GB free disk per run
+- Every run shows progress bars (download+align, GPU tiles) and live/peak
+  CPU, RAM, VRAM usage plus wall time from `scripts/resource_monitor.py`
 - Conda environment:
 
 ```bash
@@ -82,9 +84,13 @@ conda env create -f environment.yml    # neuralq-s2sr-core, Python 3.12
 conda activate neuralq-s2sr-core
 ```
 
-- The compiled preprocessing engine (STAC access, co-registration, tiled I/O)
-  is installed separately as a wheel; `scripts/upstream.py` is the single
-  integration point (`NEURALQ_ENGINE_MODULE`, `NEURALQ_UPSTREAM_OBJECT`)
+Clone with Git LFS so `models/*.pt` and the example products are materialized,
+not pointer files (`git lfs pull` if cloned without it).
+
+The pipeline runs entirely on the local, pure-Python engine in
+`scripts/local_engine/` (Earth Search STAC + AWS Sentinel-2 COGs) — no
+compiled wheel or external engine is required. A different engine can be
+plugged in with `NEURALQ_ENGINE_MODULE=<import name>`.
 - GDAL CLI tools (`gdalbuildvrt`, `gdalwarp`, `gdal_translate`) on PATH for mosaics
 
 ## Usage
@@ -121,7 +127,7 @@ python examples/run_mosaique_doha.py         # resumable; --max-dates N; keep --
 Verification and tests:
 
 ```bash
-sha256sum models/S2SR-GL-20241022.1.pt       # must match the pinned digest above
+sha256sum models/s2sr-v3.0.0.pt             # must match the pinned digest above
 python3 tests/test_pipeline_units.py         # runs anywhere; no dependencies
 ```
 

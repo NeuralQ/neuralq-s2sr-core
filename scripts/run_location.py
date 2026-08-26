@@ -44,7 +44,7 @@ from output_layout import (
 )
 
 ROOT = Path(__file__).resolve().parents[1]
-MODEL_ID = "S2SR-GL-20241022.1"
+MODEL_ID = "s2sr-v3.0.0"
 DEFAULT_MODEL = ROOT / "models" / f"{MODEL_ID}.pt"
 
 

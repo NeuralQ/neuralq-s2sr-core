@@ -110,3 +110,7 @@ outputs/TN/2026-08-23/inf-20260824T130520Z-34.42500N-8.78500E-e62d/indices/water
 outputs/TN/2026-08-23/inf-20260824T130520Z-34.42500N-8.78500E-e62d/indices/water/mndwi.tiff filter=lfs diff=lfs merge=lfs -text
 outputs/TN/2026-08-23/inf-20260824T130520Z-34.42500N-8.78500E-e62d/indices/water/ndmi.tiff filter=lfs diff=lfs merge=lfs -text
 outputs/TN/2026-08-23/inf-20260824T130520Z-34.42500N-8.78500E-e62d/indices/water/ndwi.tiff filter=lfs diff=lfs merge=lfs -text
+
+# rasters
+*.tif filter=lfs diff=lfs merge=lfs -text
+*.tiff filter=lfs diff=lfs merge=lfs -text

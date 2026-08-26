@@ -26,6 +26,7 @@ def predict_normalized(
     if device is None:
         device = next(model.parameters()).device
     output = model(tensor.to(device, non_blocking=True)).detach().cpu()
+    output = output.clone()
     return output.squeeze(0) if squeeze_batch else output
 
 
@@ -41,5 +42,5 @@ def super_resolve_dn(
         raise ValueError("max_range must be positive")
     normalized = np.asarray(stack, dtype=np.float32) / max_range
     output = predict_normalized(model, normalized, device=device)
-    output = output.clamp_(0, 1).mul_(max_range)
+    output = torch.clamp(output, 0, 1) * max_range
     return output.numpy().astype(np.uint16)

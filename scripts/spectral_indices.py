@@ -71,7 +71,10 @@ def _formulas() -> dict[str, object]:
         return result.astype(np.float32)
 
     def savi(b):
-        return (1.5 * (b["B08"] - b["B04"]) / (b["B08"] + b["B04"] + 0.5)).astype(np.float32)
+        denominator = b["B08"] + b["B04"] + 0.5
+        with np.errstate(divide="ignore", invalid="ignore"):
+            result = np.where(denominator == 0, np.nan, 1.5 * (b["B08"] - b["B04"]) / denominator)
+        return result.astype(np.float32)
 
     def mtci(b):
         with np.errstate(divide="ignore", invalid="ignore"):

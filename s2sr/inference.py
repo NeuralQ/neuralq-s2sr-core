@@ -43,4 +43,4 @@ def super_resolve_dn(
     normalized = np.asarray(stack, dtype=np.float32) / max_range
     output = predict_normalized(model, normalized, device=device)
     output = torch.clamp(output, 0, 1) * max_range
-    return output.numpy().astype(np.uint16)
+    return torch.round(output).numpy().astype(np.uint16)

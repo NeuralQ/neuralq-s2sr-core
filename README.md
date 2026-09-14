@@ -30,8 +30,11 @@ resumable pipeline.
 | Input | `N x 50 x H x W`, reflectance DN / 10000 |
 | Output | `N x 10 x 10H x 10W`, uint16 (clamped) |
 | Parameters | 105,055,800 |
-| Checkpoint | `models/s2sr-v3.0.0.pt` |
-| Checkpoint SHA-256 | `1ac3d52cac3737842538ed09f329b0023b43cd3d5f509ccce36a0951cb2dd520` |
+| Checkpoint | `s2sr-v3.0.0.pt`, hosted on the private Hugging Face repo [`Khlaifiabilel/neuralq-s2sr-core`](https://huggingface.co/Khlaifiabilel/neuralq-s2sr-core) |
+
+The checkpoint is downloaded (and cached by `huggingface_hub`, so only once)
+on first use; the repo is private, so a Hugging Face read token must be set
+as `HF_TOKEN` in the environment.
 
 Band order (per date): `B02 B03 B04 B08 B05 B06 B07 B11 B12 B8A`.
 
@@ -47,9 +50,10 @@ Architecture:
 Python API:
 
 ```python
-from s2sr import load_model, super_resolve_dn
+from s2sr import load_model, resolve_checkpoint, super_resolve_dn
 
-model = load_model("models/s2sr-v3.0.0.pt", device="cuda")
+checkpoint = resolve_checkpoint()   # downloads from HF (HF_TOKEN required); cached after first call
+model = load_model(checkpoint, device="cuda")
 sr = super_resolve_dn(model, stack_dn)   # (50, H, W) uint16 -> (10, 10H, 10W) uint16
 ```
 
@@ -57,19 +61,16 @@ sr = super_resolve_dn(model, stack_dn)   # (50, H, W) uint16 -> (10, 10H, 10W) u
 
 ```
 neuralq-s2sr-core/
-├── models/                  checkpoint (SHA-256-pinned)
-├── s2sr/                    model package: architecture, loader, inference helpers
+├── models/                  optional local checkpoint override (see --model)
+├── s2sr/                    model package: architecture, HF loader, inference helpers
 ├── scripts/                 generic, location-agnostic pipeline
 │   ├── upstream.py          integration boundary to the compiled preprocessing engine
 │   ├── output_layout.py     shared helpers: IDs, geocoding, inventories, README writer
 │   ├── run_location.py      single-location inference (any coordinates)
 │   ├── run_mosaic.py        resumable boundary tiling -> clipped BigTIFFs (any city)
 │   └── spectral_indices.py  15 indices in 4 categories from MS.tif
-├── examples/                location presets; see examples/README.md
-│   ├── run_location_doha.py Doha defaults wrapper
-│   └── run_mosaique_doha.py Doha weekly time-series orchestrator
 ├── tests/                   stdlib-only unit tests
-└── outputs/                 products; transient .work/ scratch auto-removed
+└── outputs/                 empty until a run writes products here; transient .work/ scratch auto-removed
 ```
 
 ## Requirements
@@ -84,14 +85,43 @@ conda env create -f environment.yml    # neuralq-s2sr-core, Python 3.12
 conda activate neuralq-s2sr-core
 ```
 
-Clone with Git LFS so `models/*.pt` and the example products are materialized,
-not pointer files (`git lfs pull` if cloned without it).
+The checkpoint is downloaded from the private Hugging Face repo
+[`Khlaifiabilel/neuralq-s2sr-core`](https://huggingface.co/Khlaifiabilel/neuralq-s2sr-core)
+on first use — set a Hugging Face read token as `HF_TOKEN` in the
+environment before running anything:
+
+```bash
+export HF_TOKEN=hf_xxx
+```
+
+Use `--model /path/to/checkpoint.pt` on `run_location.py` to override with a
+local file instead (e.g. from `models/`).
 
 The pipeline runs entirely on the local, pure-Python engine in
 `scripts/local_engine/` (Earth Search STAC + AWS Sentinel-2 COGs) — no
 compiled wheel or external engine is required. A different engine can be
 plugged in with `NEURALQ_ENGINE_MODULE=<import name>`.
 - GDAL CLI tools (`gdalbuildvrt`, `gdalwarp`, `gdal_translate`) on PATH for mosaics
+
+## Docker
+
+A dedicated container (`Dockerfile`, `docker-compose.yml`) runs the pipeline
+without a local conda install, on GPU or CPU:
+
+```bash
+docker compose build
+docker compose run --rm s2sr-gpu python scripts/run_location.py \
+  --lon 51.531 --lat 25.2886 --date 2026-08-14        # GPU (needs NVIDIA Container Toolkit)
+docker compose run --rm s2sr-cpu python scripts/run_location.py \
+  --device cpu --lon 51.531 --lat 25.2886 --date 2026-08-14 --search-only
+```
+
+`HF_TOKEN` must be set in the shell before running compose (both services
+require it to download the private checkpoint). `./outputs` is bind-mounted
+read-write; named volumes `neuralq-s2sr-core-cache` and
+`neuralq-s2sr-core-hf-cache` persist the reverse-geocoding cache and the
+downloaded checkpoint across runs. See the top of `Dockerfile` and
+`docker-compose.yml` for plain `docker run` equivalents.
 
 ## Usage
 
@@ -116,18 +146,9 @@ python scripts/run_mosaic.py \
 Resumable; tiles validated on accept and finals revalidated on rerun.
 Budget ~37 GB peak working state per date.
 
-Time series:
-
-```bash
-python examples/run_mosaique_doha.py --plan-dates \
-  --start-date 2020-01-01 --end-date 2026-08-21 --frequency weekly
-python examples/run_mosaique_doha.py         # resumable; --max-dates N; keep --workers 1
-```
-
 Verification and tests:
 
 ```bash
-sha256sum models/s2sr-v3.0.0.pt             # must match the pinned digest above
 python3 tests/test_pipeline_units.py         # runs anywhere; no dependencies
 ```
 
@@ -176,8 +197,9 @@ Full set ≈ 1 GB per inference (15 files × ~67 MB).
   alone covers model inference from pre-aligned stacks only.
 - Mosaic geometry is only as current as the cached OSM boundary; delete the
   cache entry to re-fetch.
-- Golden-fingerprint verification tooling was removed in cleanup; integrity is
-  anchored by the pinned checkpoint SHA-256.
+- Requires an `HF_TOKEN` with read access to the private
+  `Khlaifiabilel/neuralq-s2sr-core` repo; without it the checkpoint cannot
+  be downloaded.
 
 ## License
 

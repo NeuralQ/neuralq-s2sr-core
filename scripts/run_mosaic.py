@@ -62,6 +62,8 @@ from output_layout import (
 
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 NOMINATIM_SEARCH_URL = "https://nominatim.openstreetmap.org/search"
 DEFAULT_BOUNDARY_QUERY = "Doha, Qatar"
 DEFAULT_OSM_ID = 27332
@@ -770,13 +772,15 @@ def write_mosaic_readme(
         if preview_entry
         else []
     )
-    checkpoint = ROOT / "models" / f"{run_location_module.MODEL_ID}.pt"
+    from s2sr.hub import HF_REPO_ID, cached_checkpoint_path
+
+    checkpoint = cached_checkpoint_path()
     model_section = {
         "model_id": run_location_module.MODEL_ID,
-        "checkpoint": str(checkpoint),
+        "checkpoint": f"hf://{HF_REPO_ID}/{run_location_module.MODEL_ID}.pt",
         "device": "per-tile subprocess of scripts/run_location.py",
     }
-    if checkpoint.is_file():
+    if checkpoint is not None:
         from output_layout import sha256_file
 
         model_section["checkpoint_sha256"] = sha256_file(checkpoint)

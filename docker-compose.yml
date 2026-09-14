@@ -1,0 +1,61 @@
+# Dedicated NeuralQ S2SR services: one CPU-only, one GPU-accelerated.
+# Both share the same image/build and the same output/cache volumes.
+#
+# The checkpoint is downloaded from the private Hugging Face repo
+# Khlaifiabilel/neuralq-s2sr-core on first use; set HF_TOKEN (a Hugging Face
+# read token) in the shell before running compose, e.g.:
+#   export HF_TOKEN=hf_xxx
+#
+#   docker compose build
+#   docker compose run --rm s2sr-gpu python scripts/run_location.py \
+#       --lon 51.531 --lat 25.2886 --date 2026-08-14
+#   docker compose run --rm s2sr-cpu python scripts/run_location.py \
+#       --device cpu --lon 51.531 --lat 25.2886 --date 2026-08-14 --search-only
+#
+# GPU service requires the NVIDIA Container Toolkit on the host
+# (https://github.com/NVIDIA/nvidia-container-toolkit). Without it, only
+# s2sr-cpu will run.
+x-s2sr-common: &s2sr-common
+  build:
+    context: .
+    dockerfile: Dockerfile
+  image: neuralq-s2sr-core:latest
+  working_dir: /app
+  environment:
+    PYTHONUNBUFFERED: "1"
+    HF_TOKEN: ${HF_TOKEN:?set HF_TOKEN to a Hugging Face read token}
+  volumes:
+    - ./outputs:/app/outputs
+    - s2sr-cache:/home/mambauser/.cache/neuralq-s2sr-core
+    - hf-cache:/home/mambauser/.cache/huggingface
+  stdin_open: true
+  tty: true
+
+services:
+  s2sr-cpu:
+    <<: *s2sr-common
+    container_name: neuralq-s2sr-core-cpu
+    command: ["python", "scripts/run_location.py", "--device", "cpu", "--help"]
+
+  s2sr-gpu:
+    <<: *s2sr-common
+    container_name: neuralq-s2sr-core-gpu
+    command: ["python", "scripts/run_location.py", "--device", "cuda", "--help"]
+    environment:
+      PYTHONUNBUFFERED: "1"
+      HF_TOKEN: ${HF_TOKEN:?set HF_TOKEN to a Hugging Face read token}
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: ["gpu"]
+
+volumes:
+  s2sr-cache:
+    name: neuralq-s2sr-core-cache
+  hf-cache:
+    name: neuralq-s2sr-core-hf-cache

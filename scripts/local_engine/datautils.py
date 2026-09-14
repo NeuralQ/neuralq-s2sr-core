@@ -78,9 +78,10 @@ def search_collection(args) -> None:
 
 
 def sort_items_by_recency_and_clouds(items: list[dict]) -> list[dict]:
+    # Most recent date first; lowest cloud cover first within the same date.
     return sorted(
         items,
-        key=lambda item: (item["info"]["date"], item["info"]["clouds"]),
+        key=lambda item: (item["info"]["date"], -item["info"]["clouds"]),
         reverse=True,
     )
 

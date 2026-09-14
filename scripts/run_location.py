@@ -44,8 +44,12 @@ from output_layout import (
 )
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+# Kept local (rather than imported from s2sr.hub) so this module stays
+# importable without torch/numpy, e.g. for the stdlib-only unit tests.
 MODEL_ID = "s2sr-v3.0.0"
-DEFAULT_MODEL = ROOT / "models" / f"{MODEL_ID}.pt"
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -55,7 +59,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--lon", type=float, required=True)
     parser.add_argument("--lat", type=float, required=True)
     parser.add_argument("--date", required=True, help="Target date in YYYY-MM-DD form")
-    parser.add_argument("--model", type=Path, default=DEFAULT_MODEL)
+    parser.add_argument(
+        "--model",
+        type=Path,
+        default=None,
+        help=(
+            "Local checkpoint path; omit to download from the private "
+            "Hugging Face repo (requires HF_TOKEN)"
+        ),
+    )
     parser.add_argument(
         "--output",
         type=Path,
@@ -124,9 +136,17 @@ def main(argv: list[str] | None = None) -> None:
     os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
     target_date = datetime.strptime(options.date, "%Y-%m-%d").strftime("%Y%m%d")
-    model_path = options.model.resolve()
-    if not model_path.is_file():
-        raise SystemExit(f"Model not found: {model_path}")
+    if options.model is not None:
+        model_path = options.model.resolve()
+        if not model_path.is_file():
+            raise SystemExit(f"Model not found: {model_path}")
+    else:
+        from s2sr.hub import resolve_checkpoint
+
+        try:
+            model_path = resolve_checkpoint()
+        except Exception as error:
+            raise SystemExit(str(error))
 
     if options.output is not None:
         output_dir = options.output.resolve()

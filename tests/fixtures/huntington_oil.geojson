@@ -1,0 +1,22 @@
+{
+  "type": "FeatureCollection",
+  "name": "Huntington Beach oil — 2 Oct 2021, derived from OSI>0.15 window, for CI",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {"label": "oil", "source": "Huntington Beach 33.62N -118.00W, 2021-10-05, OSI>0.15 on water, 500x500 window around median oil candidate"},
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[-118.005, 33.618], [-117.995, 33.618], [-117.995, 33.622], [-118.005, 33.622], [-118.005, 33.618]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {"label": "clean_water", "source": "open Pacific west of slick"},
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[-118.02, 33.62], [-118.01, 33.62], [-118.01, 33.63], [-118.02, 33.63], [-118.02, 33.62]]]
+      }
+    }
+  ]
+}

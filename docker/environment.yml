@@ -11,6 +11,9 @@ dependencies:
   - numpy
   - imagecodecs
   - requests
+  - jupyterlab
+  - ipywidgets
+  - matplotlib
   - pip:
       - torch==2.13.0
       - torchvision==0.28.0

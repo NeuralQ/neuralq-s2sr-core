@@ -298,12 +298,13 @@ def test_mosaic_lst_is_opt_in_float():
 def test_oil_fixture_threshold_regression():
     import json
 
-    fixture = REPO / "tests" / "fixtures" / "wakashio_oil.geojson"
-    ok(fixture.is_file(), "oil fixture exists")
-    collection = json.loads(fixture.read_text(encoding="utf-8"))
-    ok(collection["type"] == "FeatureCollection", "fixture is FeatureCollection")
-    labels = {f["properties"]["label"] for f in collection["features"]}
-    ok("oil" in labels and "clean_water" in labels, "fixture has oil + clean_water")
+    for name in ("wakashio_oil.geojson", "sousse_harbour.geojson"):
+        fixture = REPO / "tests" / "fixtures" / name
+        ok(fixture.is_file(), f"oil fixture {name} exists")
+        collection = json.loads(fixture.read_text(encoding="utf-8"))
+        ok(collection["type"] == "FeatureCollection", f"{name} is FeatureCollection")
+        labels = {f["properties"]["label"] for f in collection["features"]}
+        ok(bool(labels & {"oil", "oil_candidate"}) and "clean_water" in labels, f"{name} has oil + clean_water")
     # Smoke the OSI formula on synthetic oil vs water spectra — threshold drift guard
     import sys as _sys
 

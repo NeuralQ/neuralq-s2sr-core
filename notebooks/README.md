@@ -6,7 +6,9 @@ Interactive 1 m S2SR exploration — works on the latest `outputs/` run or on a 
 
 | File | Purpose |
 |---|---|
-| `demo.ipynb` | 8 sections: 1) synthetic model demo (no STAC) → 2) load `MS.tif` → 3) TCI visual → 4) NDVI compute + histogram → 5) all indices list → 6) oil OSI threshold on water → 7) LST vs NDVI 2D histogram → 8) export binary oil mask. Generates matplotlib charts. |
+| `demo.ipynb` | 8 sections: 1) synthetic model demo (no STAC) → 2) load `MS.tif` → 3) TCI visual → 4) NDVI histogram → 5) all indices → 6) oil OSI threshold → 7) LST vs NDVI → 8) export mask. Overview + charts. |
+| `02_oil_spill.ipynb` | Dedicated oil: 6 indices at 1 m, water/glint masking, histograms per scene, interactive `OSI/HI/FOI` sliders (ipywidgets), triple test, HI vs OSI scatter, mask export. |
+| `03_lst_thermal.ipynb` | LST 1 m (Celsius): AWS config cell (env vs `~/.aws/credentials` vs instance role), ST check, `lst.tiff` visual + histogram + legend tags, LST vs NDVI scatter + 1 m fit vs 30 m fit in run README, on-demand `compute_lst` on existing `MS.tif` without re-running S2SR. |
 
 ## How to run (explicit)
 

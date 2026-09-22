@@ -1,4 +1,12 @@
-"""datautils shim: AOI construction and STAC scene search/ranking."""
+"""datautils — AOI geometry and Earth Search STAC search/ranking for Sentinel-2 L2A.
+
+AOI is a 2×2 km square (configurable) around the target lon/lat, converted to
+WGS84 bbox with latitude-corrected longitude delta. STAC search covers
+``target ±120 days`` (→ target+1 day), filters ``eo:cloud_cover ≤80%``,
+and ranks by recency then cloud. ``select_stack_dates`` picks the anchor
+closest to target + the 4 clearest same-MGRS dates (unique dates, tile-
+consistent) for the 5-date MISR stack. All network calls retry 3×.
+"""
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
@@ -27,6 +35,8 @@ def aoi_from_xy(lonlat, km: float = 2) -> dict:
 
 
 def _stac_search(bbox: list[float], start: str, end: str) -> list[dict]:
+    import time as _time
+
     payload = {
         "collections": [COLLECTION],
         "datetime": f"{start}T00:00:00Z/{end}T23:59:59Z",
@@ -37,9 +47,16 @@ def _stac_search(bbox: list[float], start: str, end: str) -> list[dict]:
     features: list[dict] = []
     url, method, body = STAC_URL, "POST", payload
     while True:
-        kwargs = {"json" if method == "POST" else "params": body}
-        response = requests.request(method, url, timeout=120, **kwargs)
-        response.raise_for_status()
+        for attempt in range(3):
+            try:
+                kwargs = {"json" if method == "POST" else "params": body}
+                response = requests.request(method, url, timeout=120, **kwargs)
+                response.raise_for_status()
+                break
+            except Exception as exc:
+                if attempt == 2:
+                    raise RuntimeError(f"STAC search failed for {url!r}: {exc}") from exc
+                _time.sleep(2 * (attempt + 1))
         page = response.json()
         features.extend(page.get("features", []))
         link = next((l for l in page.get("links", []) if l.get("rel") == "next"), None)

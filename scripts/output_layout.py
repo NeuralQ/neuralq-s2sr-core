@@ -1,4 +1,10 @@
-"""Shared helpers for organized S2SR inference output directories."""
+"""Shared helpers — organized ``outputs/<CC>/<date>/<id>/``, geocoding, SHA256, inventories.
+
+Country code is reverse-geocoded via Nominatim and cached at
+``~/.cache/neuralq-s2sr-core/geo_cache.json`` (or ``$S2SR_GEO_CACHE``).
+``product_inventory`` reads raster headers (rasterio) and hashes files
+(8 MiB chunks). All READMEs are atomically written via ``.tmp`` + rename.
+"""
 from __future__ import annotations
 
 import hashlib

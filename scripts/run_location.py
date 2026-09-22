@@ -47,8 +47,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-# Kept local (rather than imported from s2sr.hub) so this module stays
-# importable without torch/numpy, e.g. for the stdlib-only unit tests.
+# Bundled checkpoint id; mirrors s2sr.hub.MODEL_ID but kept local so this
+# module stays importable without torch/numpy for the stdlib-only unit tests.
 MODEL_ID = "s2sr-v3.0.0"
 
 
@@ -64,8 +64,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=Path,
         default=None,
         help=(
-            "Local checkpoint path; omit to download from the private "
-            "Hugging Face repo (requires HF_TOKEN)"
+            "Local checkpoint path; omit to use the bundled models/s2sr-v3.0.0.pt "
+            "baked into the repo / container image"
         ),
     )
     parser.add_argument(
@@ -122,6 +122,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Do not compute the spectral-index rasters from MS",
     )
+    parser.add_argument(
+        "--skip-lst",
+        action="store_true",
+        help="Do not compute the sharpened land-surface-temperature raster (needs AWS credentials for Landsat ST)",
+    )
     return parser.parse_args(argv)
 
 
@@ -145,6 +150,14 @@ def main(argv: list[str] | None = None) -> None:
 
         try:
             model_path = resolve_checkpoint()
+        except Exception as error:
+            raise SystemExit(str(error))
+
+    if os.environ.get("S2SR_SKIP_CHECKSUM", "") == "":
+        from s2sr.hub import verify_checkpoint
+
+        try:
+            verify_checkpoint(model_path)
         except Exception as error:
             raise SystemExit(str(error))
 
@@ -471,7 +484,31 @@ def _run(
         indices_note = "MS product unavailable"
     else:
         indices_records = compute_indices(output_dir / "MS.tif", indices_dir)
-        write_indices_readme(indices_dir, indices_records)
+
+    from lst import LSTUnavailable, compute_lst
+
+    lst_record = None
+    lst_note = None
+    if options.skip_lst:
+        lst_note = "disabled by --skip-lst"
+    elif not (output_dir / "MS.tif").is_file():
+        lst_note = "MS product unavailable"
+    else:
+        try:
+            search_aoi = datautils.aoi_from_xy((options.lon, options.lat), km=6)
+            lst_record = compute_lst(
+                output_dir / "MS.tif", options.date, search_aoi["bbox"]
+            )
+        except LSTUnavailable as error:
+            lst_note = f"{error.reason}: {error}"
+        except Exception as error:  # optional layer must never fail the run
+            lst_note = f"error: {error}"
+
+    catalog_records = list(indices_records)
+    if lst_record is not None:
+        catalog_records.append(lst_record)
+    if catalog_records:
+        write_indices_readme(indices_dir, catalog_records)
 
     inventory = [
         format_inventory_record(record)
@@ -532,6 +569,40 @@ def _run(
                 ]
                 or [indices_note or "none"],
                 "note": "single-band float32, compression NONE, nodata NaN",
+            },
+            "LST": {
+                "method": "TsHARP-style sharpening: Landsat C2L2 ST_B10 (30 m) "
+                "disaggregated to 1 m with S2SR NDVI + redistributed residuals",
+                "source_conversion": "Kelvin = DN x 0.00341802 + 149.0 (USGS Collection 2); "
+                "LST_1m = a + b * NDVI_1m + resid_1m",
+                "product": (
+                    f"{Path(lst_record['path']).relative_to(output_dir)}: "
+                    f"{lst_record['width']}x{lst_record['height']}, "
+                    f"float32 Celsius, compression=NONE, nodata=NaN, "
+                    f"{lst_record['size_bytes']:,} bytes"
+                    if lst_record
+                    else (lst_note or "none")
+                ),
+                "source_scene": (
+                    f"{lst_record['scene_id']} ({lst_record['scene_date']}, "
+                    f"{lst_record['date_offset_days']} days from target)"
+                    if lst_record
+                    else "-"
+                ),
+                "fit": (
+                    f"LST = {lst_record['intercept_k']:.2f} + "
+                    f"{lst_record['slope_k_per_ndvi']:.2f} * NDVI over "
+                    f"{lst_record['n_fit']} clear coarse pixels "
+                    f"(RMSE {lst_record['rmse_k']:.2f} K)"
+                    if lst_record
+                    else "-"
+                ),
+                "validation": (
+                    "coarse median inside 230..360 K; coarse means preserved "
+                    "by residual redistribution"
+                    if lst_record
+                    else (lst_note or "none")
+                ),
             },
             "Engine log": engine_log or {"note": "not retained"},
         },

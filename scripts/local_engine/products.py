@@ -1,4 +1,11 @@
-"""Product rasters from the super-resolved MS cube."""
+"""Visualization products from the super-resolved MS cube (1 m).
+
+TCI (B04/B03/B02) and IRP/CIR (B08/B04/B03) are 2–98% percentile-stretched
+per band to uint8; NDVI is computed as (B08−B04)/(B08+B04) then mapped
+through a 5-stop brown→green colormap. All three share the MS profile
+(CRS, transform, 1 m) but are uint8, COMPRESS=NONE. Purely visual — not
+scientific.
+"""
 from __future__ import annotations
 
 import numpy as np

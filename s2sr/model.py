@@ -1,11 +1,24 @@
 """Reconstructed S2SR network architecture and checkpoint loading.
 
 ``S2SRNet`` maps ``N x 50 x H x W`` normalized reflectance stacks (five
-dates x ten Sentinel-2 bands, date-major) to ``N x 10 x 10H x 10W``
-super-resolved outputs through a deformable-convolution alignment stage, a
-23-block RRDB reconstruction stage, and a 10x upsampling generator.
-``load_model`` loads the ``params_ema`` state strictly from the decrypted
-checkpoint.
+dates x ten Sentinel-2 bands, date-major, reflectance DN/10000 in 0..1) to
+``N x 10 x 10H x 10W`` super-resolved outputs (10 bands, 10×, clamped 0..1)
+through:
+
+  * **deformer** — 50→160 conv + 7× grouped deformable conv (DCNv1, groups=5,
+    90 offsets/block). Groups=5 ≡ one deformable group per input date, so the
+    network learns per-date sub-pixel offsets to compensate residual
+    misregistration after UTM WarpedVRT. DCNv1 (no modulation) is used.
+  * **encoder** — 160→160 conv + 23× RRDB (3 dense blocks each, growth 80,
+    residual scale 0.2, ESRGAN-style). Depth gives large receptive field for
+    texture synthesis; 0.2 scaling stabilizes residual-in-residual.
+  * **generator** — 10× via nearest-exact 2×2×2×1.25 + conv (no transposed
+    conv / PixelShuffle) to avoid checkerboard. Final conv is bias-free +
+    LeakyReLU to enforce non-negative reflectance without DC shift.
+
+105,055,800 parameters, ``params_ema`` (EMA) for inference stability. Science:
+multi-image SR fuses complementary aliasing across 5 dates; single-image SR
+would hallucinate. ``load_model`` does strict, assign=True load and ``eval()``.
 """
 from pathlib import Path
 
@@ -16,6 +29,8 @@ from torchvision.ops import DeformConv2d
 
 
 class S2SRResidualDenseBlock(nn.Module):
+    """Five-conv dense block with 0.2 residual scaling (ESRGAN RDB)."""
+
     def __init__(self, num_feat: int = 64, num_grow_ch: int = 32) -> None:
         super().__init__()
         self.conv1 = nn.Conv2d(num_feat, num_grow_ch, 3, 1, 1)
@@ -35,6 +50,8 @@ class S2SRResidualDenseBlock(nn.Module):
 
 
 class S2SRRRDB(nn.Module):
+    """Residual-in-Residual Dense Block: 3× RDB + 0.2 residual."""
+
     def __init__(self, num_feat: int, num_grow_ch: int = 32) -> None:
         super().__init__()
         self.rdb1 = S2SRResidualDenseBlock(num_feat, num_grow_ch)
@@ -49,6 +66,8 @@ class S2SRRRDB(nn.Module):
 
 
 class S2SRResample(nn.Module):
+    """3×3 conv (+ optional nearest-exact up / bilinear down) + LeakyReLU."""
+
     def __init__(
         self,
         in_channels: int,
@@ -80,6 +99,8 @@ class S2SRResample(nn.Module):
 
 
 class S2SRDeformationBlock(nn.Module):
+    """DCNv1 block: predicts 90 offsets (5 groups × 9 kernel) then deformable conv + ReLU."""
+
     def __init__(self, num_feat: int, kernel_size: int = 3, padding: int = 1) -> None:
         super().__init__()
         groups = 5
@@ -102,42 +123,9 @@ class S2SRDeformationBlock(nn.Module):
         return self.relu(out)
 
 
-class S2SRFusionLayer(nn.Module):
-    def __init__(self, num_feat: int) -> None:
-        super().__init__()
-        self.cnn_fc = nn.Linear(num_feat, num_feat)
-        self.transformer_fc = nn.Linear(num_feat, num_feat)
-
-    def forward(self, cnn_features: Tensor, transformer_features: Tensor) -> Tensor:
-        cnn_features = cnn_features.permute(0, 2, 3, 1)
-        transformer_features = transformer_features.permute(0, 2, 3, 1)
-        fused = self.cnn_fc(cnn_features) + self.transformer_fc(
-            transformer_features
-        )
-        return fused.permute(0, 3, 1, 2)
-
-
-class S2SRSingleDateNet(nn.Module):
-    def __init__(self, batch_norm: bool = False) -> None:
-        super().__init__()
-        del batch_norm
-        num_feat = 160
-        num_grow_ch = 80
-
-        self.encoder = nn.Sequential(
-            S2SRResample(10, num_feat),
-            *(S2SRRRDB(num_feat, num_grow_ch) for _ in range(23)),
-        )
-        self.generator = _make_generator(num_feat)
-
-        for parameter in self.parameters():
-            parameter.requires_grad = False
-
-    def forward(self, x: Tensor) -> Tensor:
-        return self.generator(self.encoder(x))
-
-
 class S2SRNet(nn.Module):
+    """105M S2SR: deformer (temporal alignment) → encoder (RRDB) → generator (10×)."""
+
     def __init__(self) -> None:
         super().__init__()
         num_feat = 160

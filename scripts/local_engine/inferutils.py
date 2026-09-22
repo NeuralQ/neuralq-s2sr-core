@@ -96,19 +96,33 @@ def _make_grid(lon: float, lat: float) -> dict:
     }
 
 
-def _read_band(href: str, grid: dict, smooth: bool) -> np.ndarray:
-    with rasterio.open(href) as source:
-        options = dict(
-            crs=grid["crs"],
-            transform=grid["transform"],
-            width=grid["width"],
-            height=grid["height"],
-            resampling=Resampling.bilinear if smooth else Resampling.nearest,
-        )
-        with WarpedVRT(source, **options) as vrt:
-            raw = vrt.read(1).astype(np.float32)
-            scale = float(vrt.scales[0] or 0.0)
-            offset = float(vrt.offsets[0] or 0.0)
+def _read_band(href: str, grid: dict, smooth: bool, retries: int = 3) -> np.ndarray:
+    import time as _time
+
+    last_exc: Exception | None = None
+    for attempt in range(retries):
+        try:
+            with rasterio.open(href) as source:
+                options = dict(
+                    crs=grid["crs"],
+                    transform=grid["transform"],
+                    width=grid["width"],
+                    height=grid["height"],
+                    resampling=Resampling.bilinear if smooth else Resampling.nearest,
+                )
+                with WarpedVRT(source, **options) as vrt:
+                    raw = vrt.read(1).astype(np.float32)
+                    scale = float(vrt.scales[0] or 0.0)
+                    offset = float(vrt.offsets[0] or 0.0)
+            break
+        except Exception as exc:  # transient S3 / network
+            last_exc = exc
+            if attempt < retries - 1:
+                _time.sleep(2 * (attempt + 1))
+                continue
+            raise RuntimeError(f"S3 read failed for {href!r} after {retries} attempts: {exc}") from exc
+    else:
+        raise RuntimeError(f"S3 read failed for {href!r}: {last_exc}")
     # Sentinel-2 L2A quantification is fixed at DN/10000; GDAL tags of 1.0
     # are unset defaults, not real scales. Only trust fractional tags, and
     # only honor negative BOA offsets (Earth Search COGs already applied).
@@ -233,6 +247,25 @@ def _run_inference(*, lonlat, date, monitor: rm.ResourceMonitor) -> None:
     print(f"  stack built: {stack.shape}, inferring...", flush=True)
     ms = _tile_inference(stack, str(CFG.model_path), int(getattr(CFG, "tile", 128)))
 
+    # Provenance + self-consistency: block-average the 1 m product back to the
+    # 10 m input grid and compare against the anchor acquisition (closest to
+    # target). This is a consistency diagnostic, not ground-truth accuracy:
+    # large MAE flags inference/geometry faults, small MAE does not prove
+    # the 1 m detail is real.
+    anchor_index = chosen.index(anchor)
+    anchor_dn = stack[anchor_index * len(BAND_ORDER) : (anchor_index + 1) * len(BAND_ORDER)].astype(
+        np.float32
+    )
+    sr_down = ms.reshape(
+        len(BAND_ORDER), grid["height"], 10, grid["width"], 10
+    ).mean(axis=(2, 4), dtype=np.float32)
+    consistency_mae = np.mean(np.abs(sr_down - anchor_dn), axis=(1, 2))
+    print(
+        f"  anchor {anchor['info']['date']} consistency MAE: "
+        f"{float(np.mean(consistency_mae)):.2f} DN",
+        flush=True,
+    )
+
     ms_path = str(save_dir / "MS.tif")
     profile = {
         "driver": "GTiff",
@@ -261,6 +294,15 @@ def _run_inference(*, lonlat, date, monitor: rm.ResourceMonitor) -> None:
         "bbox": ",".join(f"{value:.15f}" for value in wgs),
         "bands": ",".join(BAND_ORDER),
         "stack_dates": ",".join(dates),
+        "stack_item_ids": ",".join(item.get("id", "?") for item in chosen),
+        "anchor_date": anchor["info"]["date"],
+        "anchor_band_means_dn": ",".join(
+            f"{value:.1f}" for value in anchor_dn.mean(axis=(1, 2))
+        ),
+        "sr_anchor_consistency_mae_dn": f"{float(np.mean(consistency_mae)):.2f}",
+        "sr_anchor_consistency_mae_per_band_dn": ",".join(
+            f"{value:.2f}" for value in consistency_mae
+        ),
         "save_path_MS": ms_path,
         "save_path_TCI": visuals[0],
         "save_path_NDVI": visuals[1],

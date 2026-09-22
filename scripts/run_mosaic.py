@@ -68,8 +68,19 @@ NOMINATIM_SEARCH_URL = "https://nominatim.openstreetmap.org/search"
 DEFAULT_BOUNDARY_QUERY = "Doha, Qatar"
 DEFAULT_OSM_ID = 27332
 TILE_TIMEOUT_DEFAULT = 1800
-PRODUCTS = {"MS": 10, "TCI": 3, "NDVI": 3, "IRP": 3}
-PRODUCT_DTYPES = {"MS": "uint16", "TCI": "uint8", "NDVI": "uint8", "IRP": "uint8"}
+PRODUCT_SPEC: dict[str, dict] = {
+    "MS": {"bands": 10, "dtype": "uint16", "itemsize": 2},
+    "TCI": {"bands": 3, "dtype": "uint8", "itemsize": 1},
+    "NDVI": {"bands": 3, "dtype": "uint8", "itemsize": 1},
+    "IRP": {"bands": 3, "dtype": "uint8", "itemsize": 1},
+    "LST": {"bands": 1, "dtype": "float32", "itemsize": 4},
+}
+# Back-compat shims for tests that import the old names
+PRODUCTS = {k: v["bands"] for k, v in PRODUCT_SPEC.items()}
+PRODUCT_DTYPES = {k: v["dtype"] for k, v in PRODUCT_SPEC.items()}
+PRODUCT_ITEMSIZE = {v["dtype"]: v["itemsize"] for v in PRODUCT_SPEC.values()}
+# LST is opt-in (needs AWS credentials per tile); the default set is unchanged.
+DEFAULT_PRODUCTS = ["MS", "TCI", "NDVI", "IRP"]
 GRID_STEP_DEFAULT = 4000.0
 TILE_FOOTPRINT_DEFAULT = 4120.0
 
@@ -145,8 +156,8 @@ def parse_args() -> argparse.Namespace:
         "--products",
         nargs="+",
         choices=tuple(PRODUCTS),
-        default=list(PRODUCTS),
-        help="Final products to retain and mosaic",
+        default=list(DEFAULT_PRODUCTS),
+        help="Final products to retain and mosaic (LST is opt-in: needs AWS credentials for Landsat ST)",
     )
     parser.add_argument(
         "--prune-unselected",
@@ -387,7 +398,7 @@ def expected_raster(boundary_utm, products: list[str], utm_crs: str) -> dict:
                     width
                     * height
                     * PRODUCTS[product]
-                    * (2 if PRODUCT_DTYPES[product] == "uint16" else 1)
+                    * PRODUCT_ITEMSIZE[PRODUCT_DTYPES[product]]
                 ),
             }
             for product in products
@@ -463,10 +474,19 @@ def find_products(
     products = {}
     for product in selected_products:
         band_count = PRODUCTS[product]
-        matches = sorted(
-            list(tile_output.glob(f"{product}.tif"))
-            + list(tile_output.rglob(f"*_{product}.tif"))
-        )
+        if product == "LST":
+            matches = sorted(tile_output.glob("indices/thermal/lst.tiff"))
+            if not matches:
+                # Tiles produced before LST moved under indices/.
+                matches = sorted(
+                    list(tile_output.glob("LST.tif"))
+                    + list(tile_output.rglob("*_LST.tif"))
+                )
+        else:
+            matches = sorted(
+                list(tile_output.glob(f"{product}.tif"))
+                + list(tile_output.rglob(f"*_{product}.tif"))
+            )
         if not matches:
             raise RuntimeError(f"Missing {product} output")
         path = matches[-1]
@@ -524,6 +544,8 @@ def run_tile(
         *options.products,
         "--skip-indices",
     ]
+    if "LST" not in options.products:
+        command.append("--skip-lst")
     environment = os.environ.copy()
     environment["PYTHONUNBUFFERED"] = "1"
     started = time.monotonic()
@@ -656,9 +678,10 @@ def build_mosaic(
         vrt = final_dir / f"{place}_{compact_date}_{product}.vrt"
         destination = final_dir / f"{place}_{compact_date}_S2SR_{product}_1m.tif"
         vrt_options = ["-overwrite", "-resolution", "highest"]
-        if product != "MS":
-            # Zero is a legitimate reflectance DN; treat it as nodata only in
-            # the uint8 visualization products, never in the scientific MS.
+        if product not in ("MS", "LST"):
+            # Zero is a legitimate reflectance DN and a legitimate Kelvin
+            # offset; treat it as nodata only in the uint8 visualization
+            # products, never in the scientific MS/LST products.
             vrt_options += ["-srcnodata", "0", "-vrtnodata", "0"]
         subprocess.run(
             [
@@ -683,6 +706,9 @@ def build_mosaic(
             "BIGTIFF=YES",
         ]
 
+        # Outside the cutline: 0 for visualizations, NaN for the float32 LST
+        # (0 Kelvin would corrupt the temperature field).
+        dst_nodata = ["-dstnodata", "nan"] if product == "LST" else ["-dstnodata", "0"]
         subprocess.run(
             [
                 executable("gdalwarp"),
@@ -690,8 +716,7 @@ def build_mosaic(
                 "-cutline",
                 str(boundary_path),
                 "-crop_to_cutline",
-                "-dstnodata",
-                "0",
+                *dst_nodata,
                 "-tr",
                 "1",
                 "1",
@@ -772,12 +797,12 @@ def write_mosaic_readme(
         if preview_entry
         else []
     )
-    from s2sr.hub import HF_REPO_ID, cached_checkpoint_path
+    from s2sr.hub import MODEL_ID as BUNDLED_MODEL_ID, cached_checkpoint_path
 
     checkpoint = cached_checkpoint_path()
     model_section = {
         "model_id": run_location_module.MODEL_ID,
-        "checkpoint": f"hf://{HF_REPO_ID}/{run_location_module.MODEL_ID}.pt",
+        "checkpoint": str(checkpoint) if checkpoint is not None else f"models/{BUNDLED_MODEL_ID}.pt (bundled)",
         "device": "per-tile subprocess of scripts/run_location.py",
     }
     if checkpoint is not None:

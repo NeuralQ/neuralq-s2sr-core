@@ -1,4 +1,10 @@
-"""Inference helpers: normalized tensor prediction and DN-level super-resolution."""
+"""Inference helpers — DN ↔ normalized conversion and tiled prediction.
+
+Sentinel-2 L2A DN are reflectance×10000. The network was trained on
+0..1 (DN/10000, date-major 10 bands). Outputs are clamped 0..1, rescaled,
+and rounded to uint16. No cloud mask is applied here; that is the STAC
+selection's job. Tiling is the caller's responsibility (GPU memory).
+"""
 import numpy as np
 import torch
 from numpy.typing import NDArray

@@ -1,7 +1,6 @@
 .git/
 outputs/
 !outputs/.gitkeep
-models/
 **/__pycache__/
 **/*.pyc
 .work/

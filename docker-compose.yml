@@ -1,10 +1,8 @@
 # Dedicated NeuralQ S2SR services: one CPU-only, one GPU-accelerated.
 # Both share the same image/build and the same output/cache volumes.
 #
-# The checkpoint is downloaded from the private Hugging Face repo
-# Khlaifiabilel/neuralq-s2sr-core on first use; set HF_TOKEN (a Hugging Face
-# read token) in the shell before running compose, e.g.:
-#   export HF_TOKEN=hf_xxx
+# The checkpoint `models/s2sr-v3.0.0.pt` is baked into the image at build
+# time — no Hugging Face access or HF_TOKEN is needed.
 #
 #   docker compose build
 #   docker compose run --rm s2sr-gpu python scripts/run_location.py \
@@ -23,11 +21,17 @@ x-s2sr-common: &s2sr-common
   working_dir: /app
   environment:
     PYTHONUNBUFFERED: "1"
-    HF_TOKEN: ${HF_TOKEN:?set HF_TOKEN to a Hugging Face read token}
   volumes:
     - ./outputs:/app/outputs
     - s2sr-cache:/home/mambauser/.cache/neuralq-s2sr-core
-    - hf-cache:/home/mambauser/.cache/huggingface
+    # Optional: test alternate weights without rebuilding:
+    # - ./my-weights.pt:/app/models/s2sr-v3.0.0.pt:ro
+  healthcheck:
+    test: ["CMD", "python", "-c", "from pathlib import Path; assert Path('models/s2sr-v3.0.0.pt').exists(); print('healthcheck OK')"]
+    interval: 30s
+    timeout: 10s
+    retries: 3
+    start_period: 15s
   stdin_open: true
   tty: true
 
@@ -43,7 +47,6 @@ services:
     command: ["python", "scripts/run_location.py", "--device", "cuda", "--help"]
     environment:
       PYTHONUNBUFFERED: "1"
-      HF_TOKEN: ${HF_TOKEN:?set HF_TOKEN to a Hugging Face read token}
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
     deploy:
@@ -57,5 +60,3 @@ services:
 volumes:
   s2sr-cache:
     name: neuralq-s2sr-core-cache
-  hf-cache:
-    name: neuralq-s2sr-core-hf-cache

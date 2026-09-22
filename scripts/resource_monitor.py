@@ -17,28 +17,37 @@ from pathlib import Path
 
 
 def _read_cpu_total() -> int:
-    with open("/proc/stat", "rb") as handle:
-        fields = handle.readline().split()[1:]
-    return sum(int(value) for value in fields)
+    try:
+        with open("/proc/stat", "rb") as handle:
+            fields = handle.readline().split()[1:]
+        return sum(int(value) for value in fields)
+    except (OSError, ValueError):
+        return 0
 
 
 def _read_cpu_idle() -> int:
-    with open("/proc/stat", "rb") as handle:
-        idle = int(handle.readline().split()[4])
-    return idle
+    try:
+        with open("/proc/stat", "rb") as handle:
+            idle = int(handle.readline().split()[4])
+        return idle
+    except (OSError, ValueError):
+        return 0
 
 
 def _read_ram() -> tuple[float, float]:
     """Return (used_gb, total_gb) from /proc/meminfo."""
-    values = {}
-    with open("/proc/meminfo", "rb") as handle:
-        for line in handle:
-            key, value = line.decode().split(":", 1)
-            if key in ("MemTotal", "MemAvailable"):
-                values[key] = int(value.strip().split()[0]) / 1024**2
-    total = values.get("MemTotal", 0.0)
-    used = total - values.get("MemAvailable", 0.0)
-    return used, total
+    try:
+        values = {}
+        with open("/proc/meminfo", "rb") as handle:
+            for line in handle:
+                key, value = line.decode().split(":", 1)
+                if key in ("MemTotal", "MemAvailable"):
+                    values[key] = int(value.strip().split()[0]) / 1024**2
+        total = values.get("MemTotal", 0.0)
+        used = total - values.get("MemAvailable", 0.0)
+        return used, total
+    except (OSError, ValueError):
+        return 0.0, 0.0
 
 
 def _cuda_memory() -> tuple[float, float] | None:

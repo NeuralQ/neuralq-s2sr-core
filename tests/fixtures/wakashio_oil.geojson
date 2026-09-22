@@ -1,0 +1,22 @@
+{
+  "type": "FeatureCollection",
+  "name": "Wakashio oil slick — synthetic fixture (approx, for CI)",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {"label": "oil", "source": "synthetic, near Pointe d'Esny 20.4381S 57.7446E, ~500m x 200m slick, for threshold regression"},
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[57.743, -20.439], [57.748, -20.439], [57.748, -20.441], [57.743, -20.441], [57.743, -20.439]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {"label": "clean_water", "source": "synthetic, adjacent clean water"},
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[57.740, -20.438], [57.742, -20.438], [57.742, -20.440], [57.740, -20.440], [57.740, -20.438]]]
+      }
+    }
+  ]
+}

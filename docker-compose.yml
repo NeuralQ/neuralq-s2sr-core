@@ -1,0 +1,62 @@
+# Dedicated NeuralQ S2SR services: one CPU-only, one GPU-accelerated.
+# Both share the same image/build and the same output/cache volumes.
+#
+# The checkpoint `models/s2sr-v3.0.0.pt` is baked into the image at build
+# time — no Hugging Face access or HF_TOKEN is needed.
+#
+#   docker compose build
+#   docker compose run --rm s2sr-gpu python scripts/run_location.py \
+#       --lon 51.531 --lat 25.2886 --date 2026-08-14
+#   docker compose run --rm s2sr-cpu python scripts/run_location.py \
+#       --device cpu --lon 51.531 --lat 25.2886 --date 2026-08-14 --search-only
+#
+# GPU service requires the NVIDIA Container Toolkit on the host
+# (https://github.com/NVIDIA/nvidia-container-toolkit). Without it, only
+# s2sr-cpu will run.
+x-s2sr-common: &s2sr-common
+  build:
+    context: .
+    dockerfile: Dockerfile
+  image: neuralq-s2sr-core:latest
+  working_dir: /app
+  environment:
+    PYTHONUNBUFFERED: "1"
+  volumes:
+    - ./outputs:/app/outputs
+    - s2sr-cache:/home/mambauser/.cache/neuralq-s2sr-core
+    # Optional: test alternate weights without rebuilding:
+    # - ./my-weights.pt:/app/models/s2sr-v3.0.0.pt:ro
+  healthcheck:
+    test: ["CMD", "python", "-c", "from pathlib import Path; assert Path('models/s2sr-v3.0.0.pt').exists(); print('healthcheck OK')"]
+    interval: 30s
+    timeout: 10s
+    retries: 3
+    start_period: 15s
+  stdin_open: true
+  tty: true
+
+services:
+  s2sr-cpu:
+    <<: *s2sr-common
+    container_name: neuralq-s2sr-core-cpu
+    command: ["python", "scripts/run_location.py", "--device", "cpu", "--help"]
+
+  s2sr-gpu:
+    <<: *s2sr-common
+    container_name: neuralq-s2sr-core-gpu
+    command: ["python", "scripts/run_location.py", "--device", "cuda", "--help"]
+    environment:
+      PYTHONUNBUFFERED: "1"
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: ["gpu"]
+
+volumes:
+  s2sr-cache:
+    name: neuralq-s2sr-core-cache

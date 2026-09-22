@@ -1,0 +1,8 @@
+.git/
+outputs/
+!outputs/.gitkeep
+**/__pycache__/
+**/*.pyc
+.work/
+*.tmp
+.pytest_cache/

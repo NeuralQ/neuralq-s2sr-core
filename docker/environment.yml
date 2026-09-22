@@ -1,0 +1,16 @@
+name: neuralq-s2sr-core
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - pip
+  - gdal=3.12.*
+  - rasterio
+  - pyproj
+  - shapely
+  - numpy
+  - imagecodecs
+  - requests
+  - pip:
+      - torch==2.13.0
+      - torchvision==0.28.0

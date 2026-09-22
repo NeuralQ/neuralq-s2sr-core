@@ -1,0 +1,67 @@
+NEURALQ RESTRICTED LICENSE
+Version 1.0 — August 25, 2026
+
+Copyright (c) 2026 Khlaifiabilel (NeuralQ).
+All rights reserved.
+
+1. Definitions
+
+   "Work" means this repository in its entirety: source code, model
+   architecture definitions, model weights and checkpoints (including the
+   decrypted checkpoint), documentation, generated products, and metadata.
+   "Use" means any reproduction, modification, distribution, execution,
+   inference, derivative creation, commercial exploitation, or integration
+   of the Work, in whole or in part.
+
+2. Reservation of Rights
+
+   Except as expressly stated in Section 3, no rights whatsoever are
+   granted under this license. All intellectual property rights in the
+   Work remain with the copyright holder.
+
+3. Permitted Access
+
+   You may clone, view, and inspect the contents of this public repository
+   solely for the purpose of reviewing what the Work contains. This
+   permission confers no right to operate, deploy, execute, or apply the
+   Work for any purpose, research or otherwise.
+
+4. Prohibited Without Written Consent
+
+   Unless you hold a separate signed agreement with the copyright holder,
+   you must NOT:
+
+   a. run inference, fine-tune, distill, or otherwise derive outputs from
+      the model weights;
+   b. copy, redistribute, sublicense, sell, mirror, or host the Work or
+      any of its artifacts;
+   c. incorporate any portion of the Work into another codebase, product,
+      dataset, publication, or service;
+   d. circumvent the access controls, encryption, or branding of the Work;
+   e. use the Work to produce, publish, or commercialize derived imagery
+      or data products.
+
+5. Third-Party Components
+
+   Dependencies and libraries required to operate the Work retain their
+   own respective licenses. Nothing in this license restricts the terms of
+   those components; it applies strictly to the Work itself.
+
+6. No Warranty
+
+   THE WORK IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INCLUDING MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE.
+   THE COPYRIGHT HOLDER IS NOT LIABLE FOR ANY DAMAGES ARISING FROM ANY USE
+   OR ATTEMPTED USE OF THE WORK.
+
+7. Termination
+
+   Any attempt to Use the Work outside Section 3 automatically terminates
+   all permissions granted here, retroactively and without notice.
+
+8. Licensing Requests
+
+   Direct all licensing inquiries in writing via
+   https://huggingface.co/Khlaifiabilel
+
+   (c) 2026 Khlaifiabilel (NeuralQ). Unauthorized use prohibited.

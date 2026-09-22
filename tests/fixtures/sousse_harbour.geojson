@@ -1,0 +1,22 @@
+{
+  "type": "FeatureCollection",
+  "name": "Sousse harbour — oil validation (hand-drawn approx, for CI)",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {"label": "oil_candidate", "source": "hand-drawn harbour water near 35.826N 10.641E, ~300x300m, for Sousse 2026-08-14 validation"},
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[10.638, 35.823], [10.645, 35.823], [10.645, 35.828], [10.638, 35.828], [10.638, 35.823]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {"label": "clean_water", "source": "open sea east of harbour"},
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[10.650, 35.820], [10.655, 35.820], [10.655, 35.825], [10.650, 35.825], [10.650, 35.820]]]
+      }
+    }
+  ]
+}

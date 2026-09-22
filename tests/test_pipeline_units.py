@@ -298,7 +298,7 @@ def test_mosaic_lst_is_opt_in_float():
 def test_oil_fixture_threshold_regression():
     import json
 
-    for name in ("wakashio_oil.geojson", "sousse_harbour.geojson"):
+    for name in ("wakashio_oil.geojson", "sousse_harbour.geojson", "huntington_oil.geojson"):
         fixture = REPO / "tests" / "fixtures" / name
         ok(fixture.is_file(), f"oil fixture {name} exists")
         collection = json.loads(fixture.read_text(encoding="utf-8"))

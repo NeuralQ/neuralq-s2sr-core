@@ -510,6 +510,25 @@ def _run(
     if catalog_records:
         write_indices_readme(indices_dir, catalog_records)
 
+    # Carbon proxy — 1 m factory/plume proxy (NDBI + ΔLST + AOT), ppm. Always
+    # attempted when MS.tif exists; never fails the run. Uses LST if present
+    # (thermal excess), otherwise NDBI+AOT only.
+    carbon_record = None
+    carbon_note = None
+    if not (output_dir / "MS.tif").is_file():
+        carbon_note = "MS product unavailable"
+    else:
+        try:
+            from carbon import compute_co2
+
+            carbon_record = compute_co2(output_dir / "MS.tif", indices_dir)
+            # Ensure it appears in the indices catalog (may have been written before)
+            if carbon_record and not any(r.get("index") == "co2" for r in catalog_records):
+                catalog_records.append(carbon_record)
+                write_indices_readme(indices_dir, catalog_records)
+        except Exception as error:
+            carbon_note = f"error: {error}"
+
     inventory = [
         format_inventory_record(record)
         for record in product_inventory(sorted(output_dir.glob("*.tif")))
@@ -603,6 +622,24 @@ def _run(
                     if lst_record
                     else (lst_note or "none")
                 ),
+            },
+            "Carbon (CO2 proxy)": {
+                "method": "1 m proxy: 420 + 8·NDBI* + 0.8·ΔLST* + 5·AOT* ppm (*=robust 0..1, p5–p98); NDBI=(B11−B08)/(B11+B08), ΔLST from thermal, AOT=(B02−B04)/(B02+B04)",
+                "product": (
+                    f"{Path(carbon_record['path']).relative_to(output_dir)}: "
+                    f"{carbon_record['width']}x{carbon_record['height']}, "
+                    f"float32 ppm, compression=NONE, nodata=NaN, "
+                    f"{carbon_record['size_bytes']:,} bytes"
+                    if carbon_record
+                    else (carbon_note or "none")
+                ),
+                "range": (
+                    f"{carbon_record['min_ppm']:.1f}–{carbon_record['max_ppm']:.1f} ppm, "
+                    f"mean {carbon_record['mean_ppm']:.1f} ppm, p5 {carbon_record['p5_ppm']:.1f} p98 {carbon_record['p98_ppm']:.1f}"
+                    if carbon_record
+                    else "-"
+                ),
+                "note": "Proxy, not a direct column — background 420 ppm + activity/plume excess; for t/hr downscale TROPOMI XCO₂ via the 1 m activity map and ERA5 wind (mass-conserving)",
             },
             "Engine log": engine_log or {"note": "not retained"},
         },

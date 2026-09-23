@@ -69,6 +69,11 @@ META: dict[str, dict[str, str]] = {
         "bands": "Landsat ST_B10, B08, B04",
         "range": "Celsius, ~-20 .. 60 typical",
     },
+    "co2": {
+        "formula": "420 + 8·NDBI* + 0.8·ΔLST* + 5·AOT*  (ppm, *=robust p5–p98)",
+        "bands": "B11,B08 (NDBI) + LST + B02,B04 (AOT)",
+        "range": "ppm, ~420–450, p98 ~440–450",
+    },
     "osi": {
         "formula": "(B11 + B12 - B08 - B04) / (B11 + B12 + B08 + B04)",
         "bands": "B04, B08, B11, B12",

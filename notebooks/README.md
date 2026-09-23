@@ -10,6 +10,7 @@ Interactive 1 m S2SR exploration — works on the latest `outputs/` run or on a 
 | `02_oil_spill.ipynb` | Dedicated oil: 6 indices at 1 m, water/glint masking, histograms per scene, interactive `OSI/HI/FOI` sliders (ipywidgets), triple test, HI vs OSI scatter, mask export. |
 | `03_lst_thermal.ipynb` | LST 1 m (Celsius): AWS config cell (env vs `~/.aws/credentials` vs instance role), ST check, `lst.tiff` visual + histogram + legend tags, LST vs NDVI scatter + 1 m fit vs 30 m fit in run README, on-demand `compute_lst` on existing `MS.tif` without re-running S2SR. |
 | `04_mosaic_viewer.ipynb` | City mosaic: BigTIFF windowed reads, `manifest.json` tiles/retries, `boundary.geojson` folium, preview `*_preview.tif`, MS chip stretch. |
+| `05_carbon_co2.ipynb` | Carbon 1 m proxy: `420+8·NDBI*+0.8·ΔLST*+5·AOT*` ppm (robust p5–p98), Sousse + Huntington, TCI vs `co2.tiff`, histogram, factory mask export, AWS config for LST. |
 
 ## How to run (explicit)
 

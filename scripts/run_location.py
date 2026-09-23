@@ -1,23 +1,38 @@
 #!/usr/bin/env python3
 """Run one S2SR super-resolution inference for a point and target date.
 
-Drives the compiled local engine end to end: STAC scene search and ranking,
-download of five usable acquisitions, co-registration into a 50-channel
-stack, tiled GPU inference, and GeoTIFF product generation. Afterwards the
-run is normalized into NeuralQ/S2SR branding (uncompressed rasters, flat
-canonical filenames, sanitized metadata and logs) and enriched with fifteen
-spectral indices.
+Scientific pipeline (MISR → 1 m):
+
+  * **Input contract:** 5 cloud-screened Sentinel-2 L2A acquisitions
+    (5 × 10 bands = 50 channels, date-major, ``B02 B03 B04 B08 B05 B06 B07
+    B11 B12 B8A`` per date), reflectance DN/10000 → 0..1. Five dates give
+    sub-pixel shifts and aliasing complementarity for multi-image SR.
+  * **Co-registration:** 10 m UTM grid (412×412) via WarpedVRT (bilinear for
+    20 m bands, nearest for 10 m), scale/offset guarded, clipped to 4.12 km.
+  * **Tiled GPU inference:** 50→160 deformable alignment (7×DCN groups=5,
+    per-date offsets) → 23×RRDB encoder → 10× generator (nearest-exact
+    2×2×2×1.25), tiled (default 128 px, sequential to limit VRAM) → 10-band
+    4120×4120 at 1 m, uint16 DN (clamp 0..1 ×10000, round).
+  * **Post:** flatten ``*_MS.tif→MS.tif``, enforce ``COMPRESS=NONE`` (3 layers:
+    write, resume, final), SHA256 inventory, sanitize branding, then
+    21 spectral indices (1 m, float32) + LST Celsius (TsHARP, 30 m→1 m) +
+    6 oil indices + carbon proxy (all 1 m, NaN nodata).
+
+Drives the local engine end-to-end (STAC search/ranking, 5-date stack,
+co-registration, tiled GPU). Afterwards the run is normalized into
+NeuralQ/S2SR branding (uncompressed rasters, flat canonical filenames,
+sanitized metadata/logs).
 
 Outputs land in ``outputs/<CC>/<date>/<inference_id>/`` with a generated
-README.md. All scratch state lives in a transient ``.work/`` directory
-inside that folder and is removed when the run ends, successfully or not -
-nothing outside ``outputs/`` is ever created or kept.
+``README.md`` (Run/Model/Products/Indices/LST/Carbon + SHA256). All scratch
+state lives in transient ``.work/`` inside that folder and is removed on
+exit — nothing outside ``outputs/`` is kept.
 
 Usage::
 
     python scripts/run_location.py --lon 51.531 --lat 25.2886 \
-        --date 2026-08-14 [--products MS TCI] [--skip-indices] \
-        [--search-only] [--tile-size 128]
+        --date 2026-08-14 [--products MS TCI] [--skip-indices] [--skip-lst] \
+        [--tile-size 128] [--search-only]
 """
 import sys
 

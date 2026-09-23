@@ -1,4 +1,21 @@
-"""inferutils: end-to-end AOI inference for the local S2SR engine."""
+"""inferutils — end-to-end AOI inference (local engine).
+
+Implements the ``datautils``/``inferutils`` contract for ``run_location``:
+
+  * UTM grid 412×412 at 10 m, center-snapped (``Affine(10,0,x0,0,-10,y1)``,
+    ``x0``/``y1`` rounded to 10 m, CRS from centroid).
+  * Per-band ``WarpedVRT`` (``bilinear`` for 20 m B05/B06/B07/B11/B12/B8A,
+    ``nearest`` for 10 m B02/B03/B04/B08) with scale/offset guard (only
+    ``0<scale<1`` and ``−2000≤offset<0`` else ``1/10000``; GDAL default
+    ``1.0`` is not a real scale). DN = rint((raw·scale+offset)·10000).
+  * Tiled ``super_resolve_dn`` (default 128 px, sequential, ``cuda`` if
+    available) → 10-band 4120×4120 at 1 m, uint16, north-up ``Affine(1,0,
+    x0,0,−1,y1)``, ``COMPRESS=NONE``, then ``products.write_visuals`` and
+    ``S2SRlog_*.json`` with ``stack_dates``, ``stack_item_ids``,
+    ``anchor_date``, ``sr_anchor_consistency_mae_dn``.
+
+3× retry on S3 reads; all state under ``savepath/datapath/logpath``.
+"""
 from __future__ import annotations
 
 import json

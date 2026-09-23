@@ -1,24 +1,29 @@
 #!/usr/bin/env python3
-"""Build a resumable S2SR mosaic over an administrative boundary.
+"""Build a resumable S2SR mosaic over an administrative boundary (city-scale).
 
-Fetches an OpenStreetMap boundary via Nominatim (``--boundary-query``,
-filtered to ``--osm-id``, offshore components beyond
-``--max-component-distance-km`` excluded), grids it into overlapping
-4.12 km tiles on a 4 km step, and processes tiles center-out through
-per-tile subprocesses of ``run_location.py``. The local UTM zone is derived
-automatically from the boundary centroid, so any city works - the default
-query remains Doha. Every product is strictly validated (dimensions, bands,
-dtype, CRS, resolution, compression) before being recorded in an atomically
-written manifest; finished tiles are skipped on rerun. The fetched boundary
-is cached under ``outputs/.boundaries/`` so resumed runs are immune to
-upstream geometry edits. When all tiles are complete the runner assembles
-boundary-clipped, uncompressed BigTIFFs per product via VRT + gdalwarp,
-adds a downsampled uncompressed GeoTIFF preview, writes a metadata README,
-and then removes its transient ``.work/`` directory inside the output folder.
+MISR tiling math:
+
+  * Boundary: OSM Nominatim ``--boundary-query`` filtered to ``--osm-id``,
+    offshore islands beyond ``--max-component-distance-km`` (default 20 km)
+    excluded, cached at ``outputs/.boundaries/<sha1>.geojson``. UTM zone
+    derived from centroid: ``EPSG:326xx`` (N) or ``327xx`` (S).
+  * Grid: 4.12 km footprint (412×412 at 10 m → 4120×4120 at 1 m) on a
+    4 km step (120 m overlap), center-out priority ``hypot(x−cx, y−cy)``
+    for early visual feedback. Each tile is a ``run_location`` subprocess
+    (``--tile-size 128``, sequential, VRAM-limited).
+  * Validation: every tile product is checked (4120×4120, bands/dtype/CRS/
+    res 1 m, ``COMPRESS=NONE``) before manifest entry (atomic write + ``flock``);
+    finished tiles are skipped on rerun. Finals are revalidated; rerunning a
+    completed mosaic is a no-op.
+  * Assembly: ``gdalbuildvrt -resolution highest`` (+ ``-srcnodata 0`` for
+    viz only, never MS/LST) → ``gdalwarp -cutline -crop_to_cutline -tr 1 1
+    -tap -r near -co COMPRESS=NONE -co BIGTIFF=YES -co TILED=YES`` →
+    boundary-clipped BigTIFFs per product (MS 10×uint16, TCI/NDVI/IRP 3×uint8,
+    LST/carbon float32), plus downsampled preview.
 
 All state lives in ``<output_dir>/.work/`` (manifest, boundary, per-tile
 products, caches, locks). Interrupted runs resume by rerunning the same
-command; once the mosaic completes and validates, rerunning is a no-op.
+command.
 
 Usage::
 

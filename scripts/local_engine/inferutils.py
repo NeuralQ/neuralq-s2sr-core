@@ -274,7 +274,7 @@ def _run_inference(*, lonlat, date, monitor: rm.ResourceMonitor) -> None:
         "count": ms.shape[0],
         "dtype": "uint16",
         "crs": grid["crs"],
-        "transform": rasterio.Affine(1, 0, grid["transform"].c, 0, 1, grid["transform"].f),
+        "transform": rasterio.Affine(1, 0, grid["transform"].c, 0, -1, grid["transform"].f),
         "compress": None,
     }
     with rasterio.open(ms_path, "w", **profile) as target:

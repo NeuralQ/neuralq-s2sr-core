@@ -88,13 +88,13 @@ neuralq-s2sr-core/
 │       ├── datautils.py     AOI 2×2 km, Earth Search STAC ±120d, 5-date MISR stack, 3× retry
 │       ├── inferutils.py    UTM 412×412 WarpedVRT (bilinear 20 m, nearest 10 m), tiled GPU, north-up MS
 │       └── products.py      TCI/IRP (2–98% stretch) + NDVI colormap (visual, not science)
-├── notebooks/               interactive 1 m exploration (jupyterlab)
-│   ├── 01_demo.ipynb        general: synthetic demo + MS.tif + TCI + NDVI + oil quick-look
-│   ├── 02_oil_spill.ipynb   oil: 6 indices at 1 m, water/glint masks, Huntington Beach 2021-10-05 case
-│   ├── 03_lst_thermal.ipynb LST: Sousse Tunisia 35.8256°N 10.641°E, AWS config, 30 m→1 m, LST vs NDVI
-│   ├── 04_mosaic_viewer.ipynb mosaic: Doha 25.2886°N 51.531°E, BigTIFF windowed, manifest, folium
-│   ├── 05_carbon_co2.ipynb  carbon: 1 m proxy 420+8·NDBI*+..., Sousse+Huntington, factory mask
-│   └── README.md            per-notebook purpose + explicit jupyter lab commands
+├── notebooks/               interactive 1 m exploration (jupyterlab), grouped by track
+│   ├── demo/                01_demo (synthetic+MS/TCI/NDVI/oil quick-look), 04_mosaic_viewer (Doha BigTIFF)
+│   ├── oil/                 02_oil_spill (6 indices, Huntington Beach 2021-10-05)
+│   ├── lst/                 03_lst_thermal (Sousse 35.8256°N 10.641°E, AWS, 30 m→1 m)
+│   ├── carbon/              05_carbon_co2 (420+8·NDBI*+..., Sousse+Huntington)
+│   ├── agritech/            06 series → 07 batch classes → 08 meteo → 09 intelligence → 10 panoptic
+│   └── README.md            track index + per-notebook purposes + commands
 ├── tests/                   stdlib-only unit tests + fixtures (Wakashio, Sousse harbour, Huntington)
 ├── docker/                  minimal conda env for image (python 3.12, gdal, torch, jupyterlab)
 ├── outputs/                 empty until a run writes products here; transient .work/ auto-removed
@@ -195,13 +195,14 @@ docker compose run --rm s2sr-gpu python scripts/run_mosaic.py \
 Notebooks (inside or outside container):
 
 ```bash
-jupyter lab notebooks/01_demo.ipynb          # general
-jupyter lab notebooks/02_oil_spill.ipynb     # Huntington Beach 2021-10-05
-jupyter lab notebooks/03_lst_thermal.ipynb   # Sousse LST (needs AWS creds)
-jupyter lab notebooks/04_mosaic_viewer.ipynb # Doha mosaic
-jupyter lab notebooks/05_carbon_co2.ipynb    # Sousse+Huntington carbon proxy
+jupyter lab notebooks/demo/01_demo.ipynb          # general
+jupyter lab notebooks/oil/02_oil_spill.ipynb       # Huntington Beach 2021-10-05
+jupyter lab notebooks/lst/03_lst_thermal.ipynb     # Sousse LST (needs AWS creds)
+jupyter lab notebooks/demo/04_mosaic_viewer.ipynb  # Doha mosaic
+jupyter lab notebooks/carbon/05_carbon_co2.ipynb   # Sousse+Huntington carbon proxy
+jupyter lab notebooks/agritech/06_crop_health_timeseries.ipynb  # crop series (run 06→10 in order)
 # Docker
-docker compose run --rm -p 8888:8888 s2sr-cpu jupyter lab --ip=0.0.0.0 --allow-root notebooks/01_demo.ipynb
+docker compose run --rm -p 8888:8888 s2sr-cpu jupyter lab --ip=0.0.0.0 --allow-root notebooks/demo/01_demo.ipynb
 ```
 
 Useful knobs: `--tile-size 64` halves GPU memory per tile,
